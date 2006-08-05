@@ -1,0 +1,76 @@
+||| Maintained by: cbarber
+
+{define-class package final MD5-DigesterImpl {inherits MD5-Digester}
+  
+  field private constant _crypto:CryptoLib
+  field private constant _context:IntVec
+
+  field private _started?:bool
+  
+  {getter public {started?}:bool
+    {return self._started?}
+  }
+  
+  {constructor package {default
+                           char-encoding:CharEncoding = CharEncoding.utf8,
+                           buffer-size:int = 64
+                       }
+    set self._crypto = {CryptoLib}
+    set self._context = {IntVec.from-size 25, 0}
+    {construct-super 
+        char-encoding = char-encoding, 
+        buffer-size = buffer-size
+    }
+  }
+  
+  {method public {start}:void
+    {super.start}
+    {self._crypto.MD5_Init self._context}
+    set self._started? = true
+  }
+  
+  {method package {add-bytes bytes:ByteVec}:void
+    {self._crypto.MD5_Update self._context, bytes}
+  }
+  
+  {method package {finish-bytes}:ByteVec
+    let bytes:ByteVec = {ByteVec.from-size 16, 0}
+    {self._crypto.MD5_Final bytes, self._context}
+    set self._started? = false
+    {return bytes}
+  }
+} || MD5-DigesterImpl
+
+{define-dll-class package final CryptoLib
+
+  {defaults calling-convention = cdecl}
+
+  let private _singleton:#CryptoLib
+
+  {constructor private {make}
+    {construct-super.DLLInterface {SharedLibrary "crypto"}}
+  }
+
+  {factory package {default}:CryptoLib
+    {if CryptoLib._singleton == null then
+        set CryptoLib._singleton = {CryptoLib.make}
+    }
+    {return {non-null CryptoLib._singleton}}
+  }
+
+  {method protected {reclaim-resources}:void
+    set CryptoLib.singleton = null
+  }
+
+  {dll-method package {MD5_Init context:CPointer}:void}
+  
+  {dll-method package {MD5_Update
+                          context:CPointer,
+                          data:ByteVec,
+                          len:int = data.size
+                      }:void
+  }
+  
+  {dll-method package {MD5_Final digest:ByteVec, context:CPointer}:void}
+
+} || CryptoLib

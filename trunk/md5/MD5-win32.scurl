@@ -1,0 +1,177 @@
+||| Maintained by: cbarber
+
+    
+{define-class package final MD5-DigesterImpl {inherits MD5-Digester}
+  
+  field private constant _advapi:AdvapiLib
+
+  field private _context:CPointer
+  field private _hasher:CPointer
+  
+  {getter public {started?}:bool
+    {return self._hasher != 0}
+  }
+
+  {constructor package {default
+                           char-encoding:CharEncoding = CharEncoding.utf8,
+                           buffer-size:int = 64
+                       }
+    set self._advapi = {AdvapiLib}
+    {construct-super 
+        char-encoding = char-encoding, 
+        buffer-size = buffer-size
+    }
+  }
+  
+  {method public {start}:void
+    {super.start}
+    {if self._context == 0 then
+        let provider-ptr:CPointerPtr = {CPointerPtr}
+        {if {self._advapi.CryptAcquireContext provider-ptr} == 0 then
+            let (errstr:String, errno:int) = {get-last-win32-error}
+            || sadman - addedtest for NTE_BAD_KEYSET
+            {if errno == NTE_KEYSET_NOT_DEF  or errno == NTE_BAD_KEYSET then
+                {if {self._advapi.CryptAcquireContext 
+                        provider-ptr, 
+                        flags = CRYPT_NEWKEYSET
+                    } == 0
+                 then
+                    {error {get-last-win32-error}}
+                }
+             else
+                {error {get-last-win32-error}}
+            }
+        }
+        set self._context = {self._advapi.add-context provider-ptr.value}
+    }
+    let hasher:CPointerPtr = {CPointerPtr}
+    {if {self._advapi.CryptCreateHash self._context, hasher} == 0 then
+        {error {get-last-win32-error}}
+    }
+    set self._hasher = {self._advapi.add-hasher hasher.value}
+  }
+      
+  {method package {add-bytes bytes:ByteVec}:void
+    {if {self._advapi.CryptHashData self._hasher, bytes} == 0 then
+        {error {get-last-win32-error}}
+    }
+  }
+
+  {method package {finish-bytes}:ByteVec
+    let bytes:ByteVec = {ByteVec.from-size 16, 0}
+    {if {self._advapi.CryptGetHashParam self._hasher, bytes} == 0 then
+        {error {get-last-win32-error}}
+    }
+    {self._advapi.CryptDestroyHash self._hasher}
+    set self._hasher = {self._advapi.remove-hasher self._hasher}
+    {return bytes}
+  }
+
+} || MD5-DigesterImpl
+
+{let package constant CALG_MD5:int = 0x8003}
+{let package constant HP_HASHVAL:int = 0x02}
+{let package constant PROV_DSS:int = 0x03}
+{let package constant CRYPT_NEWKEYSET:int = 0x08}
+
+|| sadman - added NTE_BAD_KEYSET and changed value of NTE_KEYSET_NOT_DEF
+{let package constant NTE_BAD_KEYSET:int     = 0x80090016}
+{let package constant NTE_KEYSET_NOT_DEF:int = 0x80090019}
+
+{define-dll-class package final AdvapiLib
+
+  {defaults calling-convention = stdcall, string-rep = CString}
+  
+  let private _singleton:#AdvapiLib
+
+  field private _contexts:{Set-of CPointer} = {new {Set-of CPointer}}
+  field private _hashers:{Set-of CPointer} = {new {Set-of CPointer}}
+
+  {constructor private {make}
+    {construct-super.DLLInterface {SharedLibrary "advapi32", directory-name="c:\\WINDOWS\\system32"}}
+  }
+  
+  {factory package {default}:AdvapiLib
+    {if AdvapiLib._singleton == null then
+        set AdvapiLib._singleton = {AdvapiLib.make}
+    }
+    {return {non-null AdvapiLib._singleton}}
+  }
+
+  {method protected {reclaim-resources}:void
+    set AdvapiLib._singleton = null
+    {for hasher in self._hashers do
+        {self.CryptDestroyHash hasher}
+    }
+    {self._hashers.clear}
+    {for context in self._contexts do
+        {self.CryptReleaseContext context}
+    }
+    {self._contexts.clear}
+  }
+
+  {method package {add-context context:CPointer}:CPointer
+    {self._contexts.insert context}
+    {return context}
+  }
+  {method package {remove-context context:CPointer}:CPointer
+    {self._contexts.remove context, error-if-missing? = false}
+    {return 0}
+  }
+  {method package {add-hasher hasher:CPointer}:CPointer
+    {self._hashers.insert hasher}
+    {return hasher}
+  }
+  {method package {remove-hasher hasher:CPointer}:CPointer
+    {self._hashers.remove hasher, error-if-missing? = false}
+    {return 0}
+  }
+
+  {dll-method package {CryptAcquireContext ("CryptAcquireContextA")
+                          provider-ptr:CPointerPtr,
+                          container-name:#String = null,
+                          provider-name:#String = null,
+                          type:int = PROV_DSS,
+                          flags:int = 0
+                      }:int
+  }
+      
+  {dll-method package {CryptReleaseContext
+                          provider:CPointer,
+                          flags:int = 0
+                      }:int
+  }
+      
+  {dll-method package {CryptCreateHash
+                          hProv:CPointer,
+                          algid:int = CALG_MD5,
+                          key:int = 0,
+                          flags:int = 0,
+                          hasher:CPointerPtr
+                      }:int
+  }
+  
+  {dll-method package {CryptDestroyHash
+                          hasher:CPointer
+                      }:int
+  }
+  
+  {dll-method package {CryptHashData
+                          hasher:CPointer,
+                          data:ByteVec,
+                          len:int = data.size,
+                          flags:int = 0
+                      }:int
+  }
+  
+  {dll-method package {CryptGetHashParam
+                          hasher:CPointer,
+                          param:int = HP_HASHVAL,
+                          data:ByteVec,
+                          len:IntPtr = {IntPtr value = data.size},
+                          flags:int = 0
+                      }:int
+  }
+} || AdvapiLib
+
+

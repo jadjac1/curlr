@@ -1,0 +1,17 @@
+{curl 4.0 package}
+{curl-file-attributes character-encoding = "utf8"}
+{package COM.CURLR.MD5,
+    {compiler-directives careful? = true}
+}
+
+{import * from CURL.CRYPTO.MSG-DIGEST}
+{import * from CURL.LANGUAGE.DLL-INTERFACE}
+
+{include "MD5.scurl"}
+
+{platform-switch
+ case "win32" do
+    {include "MD5-win32.scurl"}
+ case "unix" do
+    {include "MD5-unix.scurl"}
+}
