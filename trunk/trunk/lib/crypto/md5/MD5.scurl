@@ -18,6 +18,7 @@
 {import * from CURL.CRYPTO.MSG-DIGEST}
 
 || byte manipulation 
+{doc-next {purpose Return a ByteVec with the contents of an int32.}}
 {define-proc public inline {int32-to-ByteVec i:int32}:ByteVec
     let bv:ByteVec = {ByteVec.from-size 4, 0}
     set bv[0] = {bit-and i, 0x00ff} asa byte
@@ -26,7 +27,7 @@
     set bv[3] = {bit-and {bit-srl i, 24}, 0x00ff} asa byte 
     {return bv}
 }
-
+{doc-next {purpose Return a int32 from the contents of a ByteVec.}}
 {define-proc public inline {ByteVec-to-int32 bv:ByteVec}:int32
     {return
         {bit-or
@@ -37,6 +38,8 @@
         }
     }
 }
+
+{doc-next {purpose Reverse the byte order in an int32 and return an int32.}}
 {define-proc public inline {int32-reverse i:int32}:int32
     let bv:ByteVec = {int32-to-ByteVec i}
     
@@ -49,6 +52,7 @@
         }
     }
 }
+{doc-next {purpose Reverse the byte order in an int32 and return a ByteVec.}}
 {define-proc public inline {int32-reverse-ByteVec i:int32}:ByteVec
     let bv:ByteVec = {int32-to-ByteVec i}
     {return
@@ -92,12 +96,14 @@
   }
   
   || convenience functions 
+  {doc-next {purpose Return a lower case string representing the digest.}}
   {method public {to-lower-String}:String
     {return
         {{String self}.to-lower-clone}
     }
   }
   
+  {doc-next {purpose Return an upper case string representing the digest.}}
   {method public {to-upper-String}:String
     {return
         {{String self}.to-upper-clone}
@@ -294,7 +300,7 @@
     
     set self._blocks-processed = -1
 
-    
+    || create the digest by encding the bytes of the state variables
     let md5-digest:MD5-Digest = 
         {MD5-Digest 
             {int32-reverse self._H0}, 
@@ -315,12 +321,12 @@
   }
   
   || process-block
-  {method private {process-block}:void
+  {method inline private {process-block}:void
     {assert {self.block-full?}}
 
     let my-block:{FastArray-of byte} = self._block
 
-    || Step a)
+    || Encode the current block
     let W:{FastArray-of int32} = self._W
     {for t = 0 to 15 do
         let i:int = t * 4
@@ -332,82 +338,109 @@
         set W[t] = {ByteVec-to-int32 bv} 
     }
 
-    || Step c)
+    || Update the state variables
     {let 
         a:int32 = self._H0,
         b:int32 = self._H1,
         c:int32 = self._H2,
-        d:int32 = self._H3
+        d:int32 = self._H3,
+        f:int32 = 0,
+        g:int32 = 0,
+        temp:int32 = 0
     }
 
-    set a = {self.md5_ff a, b, c, d, W[ 0], self._R[0] ,  self._K[0]}
-    set d = {self.md5_ff d, a, b, c, W[ 1], self._R[1],   self._K[1]}
-    set c = {self.md5_ff c, d, a, b, W[ 2], self._R[2],   self._K[2]}
-    set b = {self.md5_ff b, c, d, a, W[ 3], self._R[3],   self._K[3]}
-    set a = {self.md5_ff a, b, c, d, W[ 4], self._R[4] ,  self._K[4]}
-    set d = {self.md5_ff d, a, b, c, W[ 5], self._R[5],   self._K[5]}
-    set c = {self.md5_ff c, d, a, b, W[ 6], self._R[6],   self._K[6]}
-    set b = {self.md5_ff b, c, d, a, W[ 7], self._R[7],   self._K[7]}
-    set a = {self.md5_ff a, b, c, d, W[ 8], self._R[8] ,  self._K[8]}
-    set d = {self.md5_ff d, a, b, c, W[ 9], self._R[9],   self._K[9]}
-    set c = {self.md5_ff c, d, a, b, W[10], self._R[10],  self._K[10]}
-    set b = {self.md5_ff b, c, d, a, W[11], self._R[11],  self._K[11]}
-    set a = {self.md5_ff a, b, c, d, W[12], self._R[12] , self._K[12]}
-    set d = {self.md5_ff d, a, b, c, W[13], self._R[13],  self._K[13]}
-    set c = {self.md5_ff c, d, a, b, W[14], self._R[14],  self._K[14]}
-    set b = {self.md5_ff b, c, d, a, W[15], self._R[15],  self._K[15]}
+    || less brain dead implementation - from the Wikipedia
+    {for i = 0 to 63 do
+        {if 0 <= i and i <= 15 then
+            set f = {self.F b,c,d}
+            set g = i
+        elseif 16 <= i and i <= 31 then
+            set f = {self.G b,c,d}
+            set g = (5*i + 1) mod 16
+        elseif 32 <= i and i <= 47 then
+            set f = {self.H b,c,d}
+            set g = (3*i + 5) mod 16
+        elseif 48 <= i and i <= 63 then
+            set f = {self.I b,c,d}
+            set g = (7*i) mod 16
+        }
+        || accumulate the state variables
+        set temp = d
+        set d = c
+        set c = b
+        set b = {self.bit-rol (a + f + self._K[i] + W[g]), self._R[i]} + b
+        set a = temp
+    }
+||--    || brain-dead implementation from the RFC spec.
+||--    set a = {self.md5_ff a, b, c, d, W[ 0], self._R[0] ,  self._K[0]}
+||--    set d = {self.md5_ff d, a, b, c, W[ 1], self._R[1],   self._K[1]}
+||--    set c = {self.md5_ff c, d, a, b, W[ 2], self._R[2],   self._K[2]}
+||--    set b = {self.md5_ff b, c, d, a, W[ 3], self._R[3],   self._K[3]}
+||--    set a = {self.md5_ff a, b, c, d, W[ 4], self._R[4] ,  self._K[4]}
+||--    set d = {self.md5_ff d, a, b, c, W[ 5], self._R[5],   self._K[5]}
+||--    set c = {self.md5_ff c, d, a, b, W[ 6], self._R[6],   self._K[6]}
+||--    set b = {self.md5_ff b, c, d, a, W[ 7], self._R[7],   self._K[7]}
+||--    set a = {self.md5_ff a, b, c, d, W[ 8], self._R[8] ,  self._K[8]}
+||--    set d = {self.md5_ff d, a, b, c, W[ 9], self._R[9],   self._K[9]}
+||--    set c = {self.md5_ff c, d, a, b, W[10], self._R[10],  self._K[10]}
+||--    set b = {self.md5_ff b, c, d, a, W[11], self._R[11],  self._K[11]}
+||--    set a = {self.md5_ff a, b, c, d, W[12], self._R[12] , self._K[12]}
+||--    set d = {self.md5_ff d, a, b, c, W[13], self._R[13],  self._K[13]}
+||--    set c = {self.md5_ff c, d, a, b, W[14], self._R[14],  self._K[14]}
+||--    set b = {self.md5_ff b, c, d, a, W[15], self._R[15],  self._K[15]}
+||--
+||--    set a = {self.md5_gg a, b, c, d, W[ 1], self._R[16], self._K[16]}
+||--    set d = {self.md5_gg d, a, b, c, W[ 6], self._R[17], self._K[17]}
+||--    set c = {self.md5_gg c, d, a, b, W[11], self._R[18], self._K[18]}
+||--    set b = {self.md5_gg b, c, d, a, W[ 0], self._R[19], self._K[19]}
+||--    set a = {self.md5_gg a, b, c, d, W[ 5], self._R[20], self._K[20]}
+||--    set d = {self.md5_gg d, a, b, c, W[10], self._R[21], self._K[21]}
+||--    set c = {self.md5_gg c, d, a, b, W[15], self._R[22], self._K[22]}
+||--    set b = {self.md5_gg b, c, d, a, W[ 4], self._R[23], self._K[23]}
+||--    set a = {self.md5_gg a, b, c, d, W[ 9], self._R[24], self._K[24]}
+||--    set d = {self.md5_gg d, a, b, c, W[14], self._R[25], self._K[25]}
+||--    set c = {self.md5_gg c, d, a, b, W[ 3], self._R[26], self._K[26]}
+||--    set b = {self.md5_gg b, c, d, a, W[ 8], self._R[27], self._K[27]}
+||--    set a = {self.md5_gg a, b, c, d, W[13], self._R[28], self._K[28]}
+||--    set d = {self.md5_gg d, a, b, c, W[ 2], self._R[29], self._K[29]}
+||--    set c = {self.md5_gg c, d, a, b, W[ 7], self._R[30], self._K[30]}
+||--    set b = {self.md5_gg b, c, d, a, W[12], self._R[31], self._K[31]}
+||--
+||--    set a = {self.md5_hh a, b, c, d, W[ 5], self._R[32], self._K[32]}
+||--    set d = {self.md5_hh d, a, b, c, W[ 8], self._R[33], self._K[33]}
+||--    set c = {self.md5_hh c, d, a, b, W[11], self._R[34], self._K[34]}
+||--    set b = {self.md5_hh b, c, d, a, W[14], self._R[35], self._K[35]}
+||--    set a = {self.md5_hh a, b, c, d, W[ 1], self._R[36], self._K[36]}
+||--    set d = {self.md5_hh d, a, b, c, W[ 4], self._R[37], self._K[37]}
+||--    set c = {self.md5_hh c, d, a, b, W[ 7], self._R[38], self._K[38]}
+||--    set b = {self.md5_hh b, c, d, a, W[10], self._R[39], self._K[39]}
+||--    set a = {self.md5_hh a, b, c, d, W[13], self._R[40], self._K[40]}
+||--    set d = {self.md5_hh d, a, b, c, W[ 0], self._R[41], self._K[41]}
+||--    set c = {self.md5_hh c, d, a, b, W[ 3], self._R[42], self._K[42]}
+||--    set b = {self.md5_hh b, c, d, a, W[ 6], self._R[43], self._K[43]}
+||--    set a = {self.md5_hh a, b, c, d, W[ 9], self._R[44], self._K[44]}
+||--    set d = {self.md5_hh d, a, b, c, W[12], self._R[45], self._K[45]}
+||--    set c = {self.md5_hh c, d, a, b, W[15], self._R[46], self._K[46]}
+||--    set b = {self.md5_hh b, c, d, a, W[ 2], self._R[47], self._K[47]}
+||--
+||--    set a = {self.md5_ii a, b, c, d, W[ 0], self._R[48], self._K[48]}
+||--    set d = {self.md5_ii d, a, b, c, W[ 7], self._R[49], self._K[49]}
+||--    set c = {self.md5_ii c, d, a, b, W[14], self._R[50], self._K[50]}
+||--    set b = {self.md5_ii b, c, d, a, W[ 5], self._R[51], self._K[51]}
+||--    set a = {self.md5_ii a, b, c, d, W[12], self._R[52], self._K[52]}
+||--    set d = {self.md5_ii d, a, b, c, W[ 3], self._R[53], self._K[53]}
+||--    set c = {self.md5_ii c, d, a, b, W[10], self._R[54], self._K[54]}
+||--    set b = {self.md5_ii b, c, d, a, W[ 1], self._R[55], self._K[55]}
+||--    set a = {self.md5_ii a, b, c, d, W[ 8], self._R[56], self._K[56]}
+||--    set d = {self.md5_ii d, a, b, c, W[15], self._R[57], self._K[57]}
+||--    set c = {self.md5_ii c, d, a, b, W[ 6], self._R[58], self._K[58]}
+||--    set b = {self.md5_ii b, c, d, a, W[13], self._R[59], self._K[59]}
+||--    set a = {self.md5_ii a, b, c, d, W[ 4], self._R[60], self._K[60]}
+||--    set d = {self.md5_ii d, a, b, c, W[11], self._R[61], self._K[61]}
+||--    set c = {self.md5_ii c, d, a, b, W[ 2], self._R[62], self._K[62]}
+||--    set b = {self.md5_ii b, c, d, a, W[ 9], self._R[63], self._K[63]}
 
-    set a = {self.md5_gg a, b, c, d, W[ 1], self._R[16], self._K[16]}
-    set d = {self.md5_gg d, a, b, c, W[ 6], self._R[17], self._K[17]}
-    set c = {self.md5_gg c, d, a, b, W[11], self._R[18], self._K[18]}
-    set b = {self.md5_gg b, c, d, a, W[ 0], self._R[19], self._K[19]}
-    set a = {self.md5_gg a, b, c, d, W[ 5], self._R[20], self._K[20]}
-    set d = {self.md5_gg d, a, b, c, W[10], self._R[21], self._K[21]}
-    set c = {self.md5_gg c, d, a, b, W[15], self._R[22], self._K[22]}
-    set b = {self.md5_gg b, c, d, a, W[ 4], self._R[23], self._K[23]}
-    set a = {self.md5_gg a, b, c, d, W[ 9], self._R[24], self._K[24]}
-    set d = {self.md5_gg d, a, b, c, W[14], self._R[25], self._K[25]}
-    set c = {self.md5_gg c, d, a, b, W[ 3], self._R[26], self._K[26]}
-    set b = {self.md5_gg b, c, d, a, W[ 8], self._R[27], self._K[27]}
-    set a = {self.md5_gg a, b, c, d, W[13], self._R[28], self._K[28]}
-    set d = {self.md5_gg d, a, b, c, W[ 2], self._R[29], self._K[29]}
-    set c = {self.md5_gg c, d, a, b, W[ 7], self._R[30], self._K[30]}
-    set b = {self.md5_gg b, c, d, a, W[12], self._R[31], self._K[31]}
-
-    set a = {self.md5_hh a, b, c, d, W[ 5], self._R[32], self._K[32]}
-    set d = {self.md5_hh d, a, b, c, W[ 8], self._R[33], self._K[33]}
-    set c = {self.md5_hh c, d, a, b, W[11], self._R[34], self._K[34]}
-    set b = {self.md5_hh b, c, d, a, W[14], self._R[35], self._K[35]}
-    set a = {self.md5_hh a, b, c, d, W[ 1], self._R[36], self._K[36]}
-    set d = {self.md5_hh d, a, b, c, W[ 4], self._R[37], self._K[37]}
-    set c = {self.md5_hh c, d, a, b, W[ 7], self._R[38], self._K[38]}
-    set b = {self.md5_hh b, c, d, a, W[10], self._R[39], self._K[39]}
-    set a = {self.md5_hh a, b, c, d, W[13], self._R[40], self._K[40]}
-    set d = {self.md5_hh d, a, b, c, W[ 0], self._R[41], self._K[41]}
-    set c = {self.md5_hh c, d, a, b, W[ 3], self._R[42], self._K[42]}
-    set b = {self.md5_hh b, c, d, a, W[ 6], self._R[43], self._K[43]}
-    set a = {self.md5_hh a, b, c, d, W[ 9], self._R[44], self._K[44]}
-    set d = {self.md5_hh d, a, b, c, W[12], self._R[45], self._K[45]}
-    set c = {self.md5_hh c, d, a, b, W[15], self._R[46], self._K[46]}
-    set b = {self.md5_hh b, c, d, a, W[ 2], self._R[47], self._K[47]}
-
-    set a = {self.md5_ii a, b, c, d, W[ 0], self._R[48], self._K[48]}
-    set d = {self.md5_ii d, a, b, c, W[ 7], self._R[49], self._K[49]}
-    set c = {self.md5_ii c, d, a, b, W[14], self._R[50], self._K[50]}
-    set b = {self.md5_ii b, c, d, a, W[ 5], self._R[51], self._K[51]}
-    set a = {self.md5_ii a, b, c, d, W[12], self._R[52], self._K[52]}
-    set d = {self.md5_ii d, a, b, c, W[ 3], self._R[53], self._K[53]}
-    set c = {self.md5_ii c, d, a, b, W[10], self._R[54], self._K[54]}
-    set b = {self.md5_ii b, c, d, a, W[ 1], self._R[55], self._K[55]}
-    set a = {self.md5_ii a, b, c, d, W[ 8], self._R[56], self._K[56]}
-    set d = {self.md5_ii d, a, b, c, W[15], self._R[57], self._K[57]}
-    set c = {self.md5_ii c, d, a, b, W[ 6], self._R[58], self._K[58]}
-    set b = {self.md5_ii b, c, d, a, W[13], self._R[59], self._K[59]}
-    set a = {self.md5_ii a, b, c, d, W[ 4], self._R[60], self._K[60]}
-    set d = {self.md5_ii d, a, b, c, W[11], self._R[61], self._K[61]}
-    set c = {self.md5_ii c, d, a, b, W[ 2], self._R[62], self._K[62]}
-    set b = {self.md5_ii b, c, d, a, W[ 9], self._R[63], self._K[63]}
-
+    || store the state variables
     set self._H0 = self._H0 + a
     set self._H1 = self._H1 + b
     set self._H2 = self._H2 + c
@@ -418,7 +451,8 @@
     
   } || process-block
   
-  {method public {F x:int32, y:int32, z:int32}:int32
+  || 
+  {method inline private {F x:int32, y:int32, z:int32}:int32
     {return
         {bit-and 0xffffffff, 
             {bit-or {bit-and x,y}, {bit-and {bit-not x}, z}}
@@ -426,7 +460,7 @@
     }
   }
   
-  {method public {G x:int32, y:int32, z:int32}:int32
+  {method inline private {G x:int32, y:int32, z:int32}:int32
     {return
         {bit-and 0xffffffff, 
             {bit-or {bit-and x, z}, {bit-and y, {bit-not z}}}
@@ -434,7 +468,7 @@
     }
   }
 
-  {method public {H x:int32, y:int32, z:int32}:int32
+  {method inline private {H x:int32, y:int32, z:int32}:int32
     {return
         {bit-and 0xffffffff, 
             {bit-xor x,y,z}
@@ -442,7 +476,7 @@
     }
   }
 
-  {method public {I x:int32, y:int32, z:int32}:int32 
+  {method inline private {I x:int32, y:int32, z:int32}:int32 
     {return
         {bit-and 0xffffffff, 
             {bit-xor y, {bit-or x, {bit-not z}}}
@@ -450,7 +484,7 @@
     }
   }
 
-  {method public {md5_ff a:int32, b:int32, c:int32, d:int32, x:int32, s:int32, t:int32}:int32
+  {method inline private {md5_ff a:int32, b:int32, c:int32, d:int32, x:int32, s:int32, t:int32}:int32
     {return 
         {self.md5_cmn
             {self.F b, c, d},
@@ -458,7 +492,7 @@
         }
     }
   }
-  {method public {md5_gg a:int32, b:int32, c:int32, d:int32, x:int32, s:int32, t:int32}:int32
+  {method inline private {md5_gg a:int32, b:int32, c:int32, d:int32, x:int32, s:int32, t:int32}:int32
     {return 
         {self.md5_cmn
             {self.G b, c, d},
@@ -466,7 +500,7 @@
         }
     }
   }
-  {method public {md5_hh a:int32, b:int32, c:int32, d:int32, x:int32, s:int32, t:int32}:int32
+  {method inline private {md5_hh a:int32, b:int32, c:int32, d:int32, x:int32, s:int32, t:int32}:int32
     {return 
         {self.md5_cmn
             {self.H b, c, d},
@@ -474,7 +508,7 @@
         }
     }
   }
-  {method public {md5_ii a:int32, b:int32, c:int32, d:int32, x:int32, s:int32, t:int32}:int32
+  {method inline private {md5_ii a:int32, b:int32, c:int32, d:int32, x:int32, s:int32, t:int32}:int32
     {return 
         {self.md5_cmn
             {self.I b, c, d},
@@ -482,35 +516,25 @@
         }
     }
   }
-  {method public {md5_cmn q:int32, a:int32, b:int32, x:int32, s:int32, t:int32}:int32
+  
+  || command formula method
+  {method inline private {md5_cmn q:int32, a:int32, b:int32, x:int32, s:int32, t:int32}:int32
     {return 
-        {self.safe-add
-            {self.bit-rol 
-                {self.safe-add
-                    {self.safe-add a, q},{self.safe-add x, t}
-                },
-                s
-            },
-            b
-        }
+        {self.bit-rol 
+            a + q + x + t,
+            s
+        } +
+        b
     }
   }
 
-  {method public {bit-rol value:int32, count:int}:int32
+  || rotate bits to the left
+  {method inline private {bit-rol value:int32, count:int}:int32
     {return
         {bit-or
             {bit-sll value, count},
             {bit-srl value, 32 - count}
         }
-    }
-  }
-  
-  {method public {safe-add x:int32, y:int32}:int32
-    {return x + y}
-    let lsw:int32 = {bit-and x, 0xFFFF} + {bit-and y, 0xFFFF}
-    let msw:int32 = {bit-srl x,  16} + {bit-srl y, 16} + {bit-srl lsw, 16}
-    {return
-        {bit-or {bit-sll msw, 16}, {bit-and lsw, 0xFFFF}}
     }
   }
 
