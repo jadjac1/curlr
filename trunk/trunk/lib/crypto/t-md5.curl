@@ -1,0 +1,52 @@
+{curl 4.0 applet}
+{curl-file-attributes character-encoding = "utf8"}
+{applet 
+    {compiler-directives
+        careful? = true
+    }    
+}
+
+{import * from COM.CURLR.CRYPTO.MD5,
+    location = "MD5.scurl"
+}
+
+{let test-vectors:StringStringTable =
+    {StringStringTable
+        "", "d41d8cd98f00b204e9800998ecf8427e",
+        "a", "0cc175b9c0f1b6a831c399e269772661",
+        "abc", "900150983cd24fb0d6963f7d28e17f72",
+        "message digest", "f96b697d7cb7938d525a2f31aaf161d0",
+        "abcdefghijklmnopqrstuvwxyz", "c3fcd3d76192e4007dfb496cca67e13b",
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789", "d174ab98d277d9f5a5611c2c9f419d9f",
+        "12345678901234567890123456789012345678901234567890123456789012345678901234567890", "57edf4a22be3c955ac49da2e2107b67a"
+    }
+}
+        
+{value
+    || create a MD5 digester
+    let md5-digester:MD5-Digester = 
+        {MD5-Digester}
+    
+    let results:VBox = {VBox}
+    
+    {for expected:String key str:String in test-vectors do
+        let result:String = 
+            {{md5-digester.digest-from-string str}.to-lower-String}
+
+        let pass?:bool = result == expected
+
+        {results.add
+            {VBox
+                {format "string: %w",str},
+                {format "expected: %w",expected},
+                {format "result: %w", result},
+                {if pass? then {text color = "green", PASS}
+                 else {bold color = "red", FAILED}
+                },
+                {hrule}
+            }
+        }
+    }
+    
+    results
+}
