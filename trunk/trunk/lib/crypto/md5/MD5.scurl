@@ -1,0 +1,829 @@
+|| MD5.scurl
+|| maintained by: sadman
+||
+|| Implementation of an MD5 message digest "derived from the RSA Data Security, Inc. MD5 Message-Digest Algorithm"
+||
+|| Classes:
+||  MD5-Digester: 
+||  MD5-Digest
+||  MD5-ByteInputStream
+||  MD5-ByteOutputStream
+|| 
+{curl 4.0 package}
+{curl-file-attributes character-encoding = "utf8"}
+{package COM.CURLR.CRYPTO.MD5,
+    {compiler-directives careful? = true}
+}
+
+{import * from CURL.CRYPTO.MSG-DIGEST}
+
+|| byte manipulation 
+{define-proc public inline {int32-to-ByteVec i:int32}:ByteVec
+    let bv:ByteVec = {ByteVec.from-size 4, 0}
+    set bv[0] = {bit-and i, 0x00ff} asa byte
+    set bv[1] = {bit-and {bit-srl i, 8}, 0x00ff}  asa byte
+    set bv[2] = {bit-and {bit-srl i, 16}, 0x00ff} asa byte
+    set bv[3] = {bit-and {bit-srl i, 24}, 0x00ff} asa byte 
+    {return bv}
+}
+
+{define-proc public inline {ByteVec-to-int32 bv:ByteVec}:int32
+    {return
+        {bit-or
+            {bit-and bv[0], 0xffffffff},
+            {bit-and {bit-sll bv[1], 8}, 0xffffffff},
+            {bit-and {bit-sll bv[2], 16}, 0xffffffff},
+            {bit-and {bit-sll bv[3], 24}, 0xffffffff}          
+        }
+    }
+}
+{define-proc public inline {int32-reverse i:int32}:int32
+    let bv:ByteVec = {int32-to-ByteVec i}
+    
+    {return
+        {bit-or
+            {bit-and bv[3], 0xffffffff},
+            {bit-and {bit-sll bv[2], 8}, 0xffffffff},
+            {bit-and {bit-sll bv[1], 16}, 0xffffffff},
+            {bit-and {bit-sll bv[0], 24}, 0xffffffff}        
+        }
+    }
+}
+{define-proc public inline {int32-reverse-ByteVec i:int32}:ByteVec
+    let bv:ByteVec = {int32-to-ByteVec i}
+    {return
+        {ByteVec
+            bv[3], bv[2], bv[1], bv[0]
+        }
+    }
+}
+
+{doc-next
+    {purpose A MD5 message digest.}
+    {details
+        {code MD5-Digest} objects may be created using
+        a {docref MD5-Digester}.
+    }
+}
+
+{define-class public final MD5-Digest 
+  {inherits {MsgDigest-of-len 4}}
+  
+  ||--------------
+  || Construction
+  ||--------------
+
+  || init
+  {doc-next
+    {purpose Initialize the digest.}
+    {parameter ...,
+        Takes the same arguments as {docref MsgDigest-of-len.default}.
+    }
+  }
+  {constructor public {default ...:any}
+    {construct-super.default ...}
+  }
+  
+  {doc-next
+    {purpose Construct from a {ctext StringInterface}.}
+  }
+  {constructor public implicit {from-string str:StringInterface}
+    {construct-super.from-string str}
+  }
+  
+  || convenience functions 
+  {method public {to-lower-String}:String
+    {return
+        {{String self}.to-lower-clone}
+    }
+  }
+  
+  {method public {to-upper-String}:String
+    {return
+        {{String self}.to-upper-clone}
+    }
+  }
+  
+  || clone
+  {doc-next
+    {purpose Creates a copy of the digest.}
+    {return-vals 
+        Returns a new MD5-Digest identical to the
+        current object.
+    }
+  }
+  {method public {clone}:MD5-Digest
+    || create a new null digest (all zero bits)
+    let result:MD5-Digest = {MD5-Digest}
+    {result.xor-with self}
+    {return result}
+  }
+
+  || combined-with
+  {doc-next
+    {purpose Returns a new digest representing the union of digests.}
+    {parameter other,
+        Another MD5 digest to be combined with this one.
+    }
+    {parameter ...,
+        Additional MD5-Digests may also be specified.
+    }
+    {return-vals Returns the new digest.}
+    {details
+        Creates a new digest from the current digest and all of those
+        passed in as arguments.  The state of the current digest
+        and all of the arguments will not be changed.
+
+        The ordering of the arguments is not significant.
+    }
+  }
+  {method public {combined-with 
+                     other:MD5-Digest, 
+                     ...:MD5-Digest
+                 }:MD5-Digest
+    let result:MD5-Digest = {MD5-Digest}
+    {result.xor-with self} || cute hack -- see clone
+    {result.add-with other}
+    {for yet-another in ... do
+        {result.add-with yet-another}
+    }
+    {return result}
+  }
+
+} || MD5-Digest
+
+{doc-next
+    {purpose A message digester for {docref MD5-Digest}}
+}
+{define-class public final MD5-Digester 
+  {inherits {MsgDigester-for MD5-Digest}}
+  
+  ||---------------
+  || Private state
+  ||---------------
+  field private _R:{FastArray-of int32} =
+      {{FastArray-of int32}
+        7, 12, 17, 22,  7, 12, 17, 22,  7, 12, 17, 22,  7, 12, 17, 22,
+        5,  9, 14, 20,  5,  9, 14, 20,  5,  9, 14, 20,  5,  9, 14, 20,
+        4, 11, 16, 23,  4, 11, 16, 23,  4, 11, 16, 23,  4, 11, 16, 23,
+        6, 10, 15, 21,  6, 10, 15, 21,  6, 10, 15, 21,  6, 10, 15, 21
+      }
+
+  field private _K:{FastArray-of int} =
+      {{FastArray-of int}
+        0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee, 0xf57c0faf, 0x4787c62a, 0xa8304613, 0xfd469501,
+        0x698098d8, 0x8b44f7af, 0xffff5bb1, 0x895cd7be, 0x6b901122, 0xfd987193, 0xa679438e, 0x49b40821,
+
+        0xf61e2562, 0xc040b340, 0x265e5a51, 0xe9b6c7aa, 0xd62f105d, 0x2441453, 0xd8a1e681, 0xe7d3fbc8,
+        0x21e1cde6, 0xc33707d6, 0xf4d50d87, 0x455a14ed, 0xa9e3e905, 0xfcefa3f8,0x676f02d9, 0x8d2a4c8a,
+
+        0xfffa3942, 0x8771f681, 0x6d9d6122, 0xfde5380c, 0xa4beea44, 0x4bdecfa9, 0xf6bb4b60, 0xbebfbc70,
+        0x289b7ec6, 0xeaa127fa, 0xd4ef3085, 0x4881d05, 0xd9d4d039, 0xe6db99e5, 0x1fa27cf8, 0xc4ac5665,
+
+        0xf4292244, 0x432aff97, 0xab9423a7, 0xfc93a039, 0x655b59c3, 0x8f0ccc92, 0xffeff47d, 0x85845dd1,
+        0x6fa87e4f, 0xfe2ce6e0, 0xa3014314, 0x4e0811a1, 0xf7537e82, 0xbd3af235, 0x2ad7d2bb, 0xeb86d391
+      }
+
+  || Message digest currently being computed
+  field private _H0:int32
+  field private _H1:int32
+  field private _H2:int32
+  field private _H3:int32
+
+
+  || Current 512 bit message block
+  field private constant _block:{FastArray-of byte} = 
+      {new {FastArray-of byte}, max-size = 64}
+  
+  || Count of blocks processed so far.  Needed to
+  || determine the message size (which is required
+  || by the algorithm.  Negative value indicates that
+  || digester is not started.
+  field private _blocks-processed:int = -1
+
+  || preallocated for use by process-block:
+  field private constant _W:{FastArray-of int32} =
+      {new {FastArray-of int32}.from-size, 16, 0}
+  
+  ||--------------
+  || Construction
+  ||--------------
+  
+  || init
+  {doc-next
+    {purpose Initialize the digester.}
+    {parameter char-encoding,
+        The character encoding to be used by 
+        {docref MD5-Digester.add-char} and 
+        related methods.  Also see {docref MsgDigester-for.default}.
+    }
+  }
+  {constructor public {default char-encoding:CharEncoding=CharEncoding.utf8}
+    {construct-super 
+        char-encoding=char-encoding
+    }
+  }
+
+  ||--------------------
+  || Digesting methods
+  ||--------------------
+  
+  || start
+  {doc-next
+    {purpose Start the digest.}
+    {details
+        Produces an error if digester was already started.
+    }
+  }
+  {method public final {start}:void
+    {if self.started? then {error}}
+    set self._H0 = 0x67452301
+    set self._H1 = 0xEFCDAB89
+    set self._H2 = 0x98BADCFE
+    set self._H3 = 0x10325476
+
+    set self._blocks-processed = 0
+  }
+  
+  || started?
+  {getter public inline final {started?}:bool
+    {return self._blocks-processed >= 0}
+  }
+
+  || add-byte
+  {method public inline final {add-byte c:byte}:void
+    {self._block.append c}
+    {if {self.block-full?} then
+        {self.process-block}
+    }
+  }
+
+  || finish
+  {method public final {finish}:MD5-Digest
+    {assert self.started?}
+    let my-block:{FastArray-of byte} = self._block
+
+    || Compute message size in bits
+    let bits-in-msg:int32 = 
+        (512 * self._blocks-processed) + (8 * my-block.size)
+    
+    || append a high-order '1' to block:
+    {my-block.append 0x80}
+
+    {if my-block.size > 56 then
+        || not enough room for message length at end of block
+        {while my-block.size < 64 do
+            {my-block.append 0}
+        }
+        {self.process-block}
+    }
+    
+    || write message length in last 64 bits of last block
+    || (We go to 59 instead of 55 because we do not yet support
+    ||  64 bit message lengths).
+    {for i:int = my-block.size to 63 do
+        {my-block.append 0}
+    }
+
+    let bv:ByteVec = {int32-to-ByteVec bits-in-msg}
+    {for i = 0 below 4 do
+        set my-block[i + 56] = bv[i]
+    }   
+    
+    {self.process-block}
+    
+    set self._blocks-processed = -1
+
+    
+    let md5-digest:MD5-Digest = 
+        {MD5-Digest 
+            {int32-reverse self._H0}, 
+            {int32-reverse self._H1}, 
+            {int32-reverse self._H2}, 
+            {int32-reverse self._H3}
+        }
+    
+
+
+    {return md5-digest}
+    
+  } || finish
+
+  || block-full?
+  {method inline private {block-full?}:bool
+    {return 64 == self._block.size}
+  }
+  
+  || process-block
+  {method private {process-block}:void
+    {assert {self.block-full?}}
+
+    let my-block:{FastArray-of byte} = self._block
+
+    || Step a)
+    let W:{FastArray-of int32} = self._W
+    {for t = 0 to 15 do
+        let i:int = t * 4
+        let bv:ByteVec = 
+            {ByteVec
+                my-block[i + 0],my-block[i + 1],my-block[i + 2],my-block[i + 3]
+            }
+
+        set W[t] = {ByteVec-to-int32 bv} 
+    }
+
+    || Step c)
+    {let 
+        a:int32 = self._H0,
+        b:int32 = self._H1,
+        c:int32 = self._H2,
+        d:int32 = self._H3
+    }
+
+    set a = {self.md5_ff a, b, c, d, W[ 0], self._R[0] ,  self._K[0]}
+    set d = {self.md5_ff d, a, b, c, W[ 1], self._R[1],   self._K[1]}
+    set c = {self.md5_ff c, d, a, b, W[ 2], self._R[2],   self._K[2]}
+    set b = {self.md5_ff b, c, d, a, W[ 3], self._R[3],   self._K[3]}
+    set a = {self.md5_ff a, b, c, d, W[ 4], self._R[4] ,  self._K[4]}
+    set d = {self.md5_ff d, a, b, c, W[ 5], self._R[5],   self._K[5]}
+    set c = {self.md5_ff c, d, a, b, W[ 6], self._R[6],   self._K[6]}
+    set b = {self.md5_ff b, c, d, a, W[ 7], self._R[7],   self._K[7]}
+    set a = {self.md5_ff a, b, c, d, W[ 8], self._R[8] ,  self._K[8]}
+    set d = {self.md5_ff d, a, b, c, W[ 9], self._R[9],   self._K[9]}
+    set c = {self.md5_ff c, d, a, b, W[10], self._R[10],  self._K[10]}
+    set b = {self.md5_ff b, c, d, a, W[11], self._R[11],  self._K[11]}
+    set a = {self.md5_ff a, b, c, d, W[12], self._R[12] , self._K[12]}
+    set d = {self.md5_ff d, a, b, c, W[13], self._R[13],  self._K[13]}
+    set c = {self.md5_ff c, d, a, b, W[14], self._R[14],  self._K[14]}
+    set b = {self.md5_ff b, c, d, a, W[15], self._R[15],  self._K[15]}
+
+    set a = {self.md5_gg a, b, c, d, W[ 1], self._R[16], self._K[16]}
+    set d = {self.md5_gg d, a, b, c, W[ 6], self._R[17], self._K[17]}
+    set c = {self.md5_gg c, d, a, b, W[11], self._R[18], self._K[18]}
+    set b = {self.md5_gg b, c, d, a, W[ 0], self._R[19], self._K[19]}
+    set a = {self.md5_gg a, b, c, d, W[ 5], self._R[20], self._K[20]}
+    set d = {self.md5_gg d, a, b, c, W[10], self._R[21], self._K[21]}
+    set c = {self.md5_gg c, d, a, b, W[15], self._R[22], self._K[22]}
+    set b = {self.md5_gg b, c, d, a, W[ 4], self._R[23], self._K[23]}
+    set a = {self.md5_gg a, b, c, d, W[ 9], self._R[24], self._K[24]}
+    set d = {self.md5_gg d, a, b, c, W[14], self._R[25], self._K[25]}
+    set c = {self.md5_gg c, d, a, b, W[ 3], self._R[26], self._K[26]}
+    set b = {self.md5_gg b, c, d, a, W[ 8], self._R[27], self._K[27]}
+    set a = {self.md5_gg a, b, c, d, W[13], self._R[28], self._K[28]}
+    set d = {self.md5_gg d, a, b, c, W[ 2], self._R[29], self._K[29]}
+    set c = {self.md5_gg c, d, a, b, W[ 7], self._R[30], self._K[30]}
+    set b = {self.md5_gg b, c, d, a, W[12], self._R[31], self._K[31]}
+
+    set a = {self.md5_hh a, b, c, d, W[ 5], self._R[32], self._K[32]}
+    set d = {self.md5_hh d, a, b, c, W[ 8], self._R[33], self._K[33]}
+    set c = {self.md5_hh c, d, a, b, W[11], self._R[34], self._K[34]}
+    set b = {self.md5_hh b, c, d, a, W[14], self._R[35], self._K[35]}
+    set a = {self.md5_hh a, b, c, d, W[ 1], self._R[36], self._K[36]}
+    set d = {self.md5_hh d, a, b, c, W[ 4], self._R[37], self._K[37]}
+    set c = {self.md5_hh c, d, a, b, W[ 7], self._R[38], self._K[38]}
+    set b = {self.md5_hh b, c, d, a, W[10], self._R[39], self._K[39]}
+    set a = {self.md5_hh a, b, c, d, W[13], self._R[40], self._K[40]}
+    set d = {self.md5_hh d, a, b, c, W[ 0], self._R[41], self._K[41]}
+    set c = {self.md5_hh c, d, a, b, W[ 3], self._R[42], self._K[42]}
+    set b = {self.md5_hh b, c, d, a, W[ 6], self._R[43], self._K[43]}
+    set a = {self.md5_hh a, b, c, d, W[ 9], self._R[44], self._K[44]}
+    set d = {self.md5_hh d, a, b, c, W[12], self._R[45], self._K[45]}
+    set c = {self.md5_hh c, d, a, b, W[15], self._R[46], self._K[46]}
+    set b = {self.md5_hh b, c, d, a, W[ 2], self._R[47], self._K[47]}
+
+    set a = {self.md5_ii a, b, c, d, W[ 0], self._R[48], self._K[48]}
+    set d = {self.md5_ii d, a, b, c, W[ 7], self._R[49], self._K[49]}
+    set c = {self.md5_ii c, d, a, b, W[14], self._R[50], self._K[50]}
+    set b = {self.md5_ii b, c, d, a, W[ 5], self._R[51], self._K[51]}
+    set a = {self.md5_ii a, b, c, d, W[12], self._R[52], self._K[52]}
+    set d = {self.md5_ii d, a, b, c, W[ 3], self._R[53], self._K[53]}
+    set c = {self.md5_ii c, d, a, b, W[10], self._R[54], self._K[54]}
+    set b = {self.md5_ii b, c, d, a, W[ 1], self._R[55], self._K[55]}
+    set a = {self.md5_ii a, b, c, d, W[ 8], self._R[56], self._K[56]}
+    set d = {self.md5_ii d, a, b, c, W[15], self._R[57], self._K[57]}
+    set c = {self.md5_ii c, d, a, b, W[ 6], self._R[58], self._K[58]}
+    set b = {self.md5_ii b, c, d, a, W[13], self._R[59], self._K[59]}
+    set a = {self.md5_ii a, b, c, d, W[ 4], self._R[60], self._K[60]}
+    set d = {self.md5_ii d, a, b, c, W[11], self._R[61], self._K[61]}
+    set c = {self.md5_ii c, d, a, b, W[ 2], self._R[62], self._K[62]}
+    set b = {self.md5_ii b, c, d, a, W[ 9], self._R[63], self._K[63]}
+
+    set self._H0 = self._H0 + a
+    set self._H1 = self._H1 + b
+    set self._H2 = self._H2 + c
+    set self._H3 = self._H3 + d
+           
+    {my-block.clear}
+    {set self._blocks-processed = self._blocks-processed + 1}
+    
+  } || process-block
+  
+  {method public {F x:int32, y:int32, z:int32}:int32
+    {return
+        {bit-and 0xffffffff, 
+            {bit-or {bit-and x,y}, {bit-and {bit-not x}, z}}
+        }
+    }
+  }
+  
+  {method public {G x:int32, y:int32, z:int32}:int32
+    {return
+        {bit-and 0xffffffff, 
+            {bit-or {bit-and x, z}, {bit-and y, {bit-not z}}}
+        }
+    }
+  }
+
+  {method public {H x:int32, y:int32, z:int32}:int32
+    {return
+        {bit-and 0xffffffff, 
+            {bit-xor x,y,z}
+        }
+    }
+  }
+
+  {method public {I x:int32, y:int32, z:int32}:int32 
+    {return
+        {bit-and 0xffffffff, 
+            {bit-xor y, {bit-or x, {bit-not z}}}
+        }
+    }
+  }
+
+  {method public {md5_ff a:int32, b:int32, c:int32, d:int32, x:int32, s:int32, t:int32}:int32
+    {return 
+        {self.md5_cmn
+            {self.F b, c, d},
+            a, b, x, s, t
+        }
+    }
+  }
+  {method public {md5_gg a:int32, b:int32, c:int32, d:int32, x:int32, s:int32, t:int32}:int32
+    {return 
+        {self.md5_cmn
+            {self.G b, c, d},
+            a, b, x, s, t
+        }
+    }
+  }
+  {method public {md5_hh a:int32, b:int32, c:int32, d:int32, x:int32, s:int32, t:int32}:int32
+    {return 
+        {self.md5_cmn
+            {self.H b, c, d},
+            a, b, x, s, t
+        }
+    }
+  }
+  {method public {md5_ii a:int32, b:int32, c:int32, d:int32, x:int32, s:int32, t:int32}:int32
+    {return 
+        {self.md5_cmn
+            {self.I b, c, d},
+            a, b, x, s, t
+        }
+    }
+  }
+  {method public {md5_cmn q:int32, a:int32, b:int32, x:int32, s:int32, t:int32}:int32
+    {return 
+        {self.safe-add
+            {self.bit-rol 
+                {self.safe-add
+                    {self.safe-add a, q},{self.safe-add x, t}
+                },
+                s
+            },
+            b
+        }
+    }
+  }
+
+  {method public {bit-rol value:int32, count:int}:int32
+    {return
+        {bit-or
+            {bit-sll value, count},
+            {bit-srl value, 32 - count}
+        }
+    }
+  }
+  
+  {method public {safe-add x:int32, y:int32}:int32
+    {return x + y}
+    let lsw:int32 = {bit-and x, 0xFFFF} + {bit-and y, 0xFFFF}
+    let msw:int32 = {bit-srl x,  16} + {bit-srl y, 16} + {bit-srl lsw, 16}
+    {return
+        {bit-or {bit-sll msw, 16}, {bit-and lsw, 0xFFFF}}
+    }
+  }
+
+} || MD5-Digester
+
+||=======================
+|| MD5-ByteInputStream
+||=======================
+
+{doc-next
+    {purpose {docref ByteInputStream} filter that computes MD5 digest}
+    {details
+        This class is used to filter an existing {docref ByteInputStream}
+        to compute a {docref MD5-Digest} based on the bytes read from
+        the underlying stream.
+
+        This should produce the same digest as that produced by 
+        {docref MD5-ByteOutputStream} for the same sequence of bytes.
+    }
+    {for-example
+        {curl-code
+            let digesting-stream:MD5-ByteInputStream =
+                {MD5-ByteInputStream existing-stream}
+            {do-something-with-stream digesting-stream}
+            {digesting-stream.close}
+            let digest:MD5-Digest = digesting-stream.digest
+        }
+    }
+}
+{define-class public final MD5-ByteInputStream
+  {inherits {InputStream-of byte}}
+
+  field private _digester:MD5-Digester
+
+  field private _stream:#ByteInputStream
+
+  field private constant close-stream-on-close?:bool
+
+  {doc-next
+    {purpose The computed MD5 message digest.}
+    {details
+        Will be null until {ctext self.finish-digest} is called, which
+        happens automatically when the stream is closed.
+    }
+  }
+  field public-get private-set digest:#MD5-Digest
+
+  ||--------------
+  || Construction
+  ||--------------
+
+  {doc-next
+    {purpose Initialize stream.}
+    {parameter stream, the underlying output stream.  All operations
+        will be dispatched to this object.
+    }
+    {parameter close-stream-on-close?, 
+        specifies whether this class's {ctext close} method should invoke 
+        {ctext close} on the underlying stream.
+    }
+  }
+  {constructor public {default
+                          stream:ByteInputStream,
+                          close-stream-on-close?:bool = true
+                      }
+    set self._stream = stream
+    set self.close-stream-on-close? = close-stream-on-close?
+    set self._digester = {MD5-Digester}
+    {self._digester.start}
+    {construct-super}
+  }
+
+  ||------------------
+  || Field access
+  ||------------------
+
+  {doc-next
+    {purpose The underlying stream object.}
+  }
+  {getter public {stream}:ByteInputStream
+    ||{self.verify-open}
+    {return {non-null self._stream}}
+  }
+
+  ||------------------
+  || Stream interface
+  ||------------------
+
+  {doc-next
+    {purpose Implement read operations}
+    {details
+        Reads from underlying stream, and if successful adds
+        byte to message digester.
+    }
+  }
+  {method public final {read-one}:(b:byte, eof?:bool)
+    let (b:byte, eof?:bool) = {self.stream.read-one}
+    {if not eof? and self._digester.started? then
+        {self._digester.add-byte b}
+    }
+    {return b, eof?}
+  }
+
+  {getter public final {open?}:bool
+    {return self._stream != null}
+  }
+
+  {doc-next
+    {purpose Closes stream and finishes message digest.}
+  }
+  {method public final {close}:void
+    {if-non-null stream = self._stream then
+        set self._stream = null
+        {try
+            {self.finish-digest}
+         finally
+            {if self.close-stream-on-close? then
+                {stream.close}
+            }
+        }
+    }
+  }
+
+  || doc inherited
+  {getter public final {origin-url}:#Url
+    {return self.stream.origin-url}
+  }
+
+  || Doc-string inherited
+  {getter public {when-last-modified}:#DateTime
+    {return self.stream.when-last-modified}
+  }
+
+ 
+  ||-------------
+  || MsgDigester
+  ||-------------
+
+  {doc-next
+    {purpose Finishes computation of message digest}
+    {details
+        All bytes read after invoking this will not be
+        reflected in the digest.
+    }
+  }
+  {method public final {finish-digest}:MD5-Digest
+    || This method can be called after the stream has been closed.  Of
+    || course, closing the stream will already have set self.digest,
+    || so such a call will just return the already-computed digest.
+    {if-non-null digest = self.digest then
+        {return digest}
+     else
+        let digest:MD5-Digest = {self._digester.finish}
+        set self.digest = digest
+        {return digest}
+    }
+  }
+
+} || MD5-ByteInputStream
+
+
+||========================
+|| MD5-ByteOutputStream
+||========================
+
+{doc-next
+    {purpose {docref ByteOutputStream} filter that computes MD5 digest}
+    {details
+        This class is used to filter an existing {docref ByteOutputStream}
+        to compute a {docref MD5-Digest} based on the bytes written to
+        the underlying stream.
+    }
+    {for-example
+        {curl-code
+            let digesting-stream:MD5-ByteOutputStream =
+                {MD5-ByteOutputStream existing-stream}
+            {do-something-with-stream digesting-stream}
+            {digesting-stream.close}
+            let digest:MD5-Digest = digesting-stream.digest
+        }
+    }
+}
+{define-class public final MD5-ByteOutputStream {inherits ByteOutputStream}
+
+  ||-------
+  || State
+  ||-------
+
+  field private constant _digester:MD5-Digester
+
+  field private _stream:#ByteOutputStream
+  
+  field private constant close-stream-on-close?:bool
+
+  {doc-next
+    {purpose The computed MD5 message digest.}
+    {details
+        Will be null until the stream is closed.
+    }
+  }
+  field public-get private-set digest:#MD5-Digest
+
+  ||--------------
+  || Construction
+  ||--------------
+
+  {doc-next
+    {purpose Initialize stream.}
+    {parameter stream, the underlying output stream.  All operations
+        will be dispatched to this object.
+    }
+    {parameter close-stream-on-close?, 
+        specifies whether this class's {ctext close} method should invoke 
+        {ctext close} on the underlying stream.
+    }
+  }
+  {constructor public {default 
+                          stream:ByteOutputStream,
+                          close-stream-on-close?:bool = true
+                      }
+    set self._stream = stream
+    set self.close-stream-on-close? = close-stream-on-close?
+    set self._digester = {MD5-Digester}
+    {self._digester.start}
+    {construct-super}
+  }
+
+  ||------------------
+  || Field access
+  ||------------------
+
+  {doc-next
+    {purpose The underlying stream object.}
+  }
+  {getter public {stream}:ByteOutputStream
+    ||{self.verify-open}
+    {return {non-null self._stream}}
+  }
+
+  ||------------------
+  || Stream interface
+  ||------------------
+
+  {doc-next
+    {purpose Implement write operations}
+    {details
+        Adds byte to message digester and writes to underlying stream.
+    }
+  }
+  {method public final {write-one b:byte}:void
+    {self.stream.write-one b}
+    {self._digester.add-byte b}
+  }
+
+  {getter public final {open?}:bool
+    {return self._stream != null}
+  }
+
+  {doc-next
+    {purpose Closes stream and finishes message digest.}
+  }
+  {method public final {close}:void
+    {if-non-null stream = self._stream then
+        set self._stream = null
+        {try
+            {self.finish-digest}
+         finally
+            {if self.close-stream-on-close? then
+                {stream.close}
+            }
+        }
+    }
+  }
+
+  {method public final {flush
+                           non-blocking?:bool = false,
+                           allow-short-write?:bool = false
+                       }:void
+    {self.stream.flush
+        non-blocking? = non-blocking?, allow-short-write? = allow-short-write?
+    }
+  }
+
+  || doc inherited
+  {getter public final {origin-url}:#Url
+    {return self.stream.origin-url}
+  }
+
+  ||-------------
+  || MsgDigester
+  ||-------------
+
+  {doc-next
+    {purpose Finishes computation of message digest}
+    {details
+        All bytes added after invoking this will not be
+        reflected in the digest.
+    }
+  }
+  {method public final {finish-digest}:MD5-Digest
+    || This method can be called after the stream has been closed.  Of
+    || course, closing the stream will already have set self.digest,
+    || so such a call will just return the already-computed digest.
+    {if-non-null digest = self.digest then
+        {return digest}
+     else
+        let digest:MD5-Digest = {self._digester.finish}
+        set self.digest = digest
+        {return digest}
+    }
+  }
+
+} || MD5-ByteOutputStream
+
+
+
