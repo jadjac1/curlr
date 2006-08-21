@@ -1,0 +1,244 @@
+|| t-shavs.curl
+|| maintained by: sadman
+||
+|| Simple test utility for COM.CURLR.CRYPTO implementations of SHA-1, SHA-224, SHA-256
+
+||
+|| Distributed under the New BSD License:
+|#
+  Copyright (c) 2006, Steve Adams
+  All rights reserved.
+
+  Redistribution and use in source and binary forms, with or without modification, are permitted 
+  provided that the following conditions are met:
+
+    * Redistributions of source code must retain the above copyright notice, this list of conditions 
+      and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright notice, this list of conditions 
+      and the following disclaimer in the documentation and/or other materials provided with the distribution.
+    * Neither the name of the <ORGANIZATION> nor the names of its contributors may be used to endorse or promote products 
+      derived from this software without specific prior written permission.
+
+  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED 
+  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A 
+  PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY 
+  DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, 
+  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) 
+  HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT 
+  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, 
+  EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#|
+{curl 4.0 applet}
+{curl-file-attributes character-encoding = "utf8"}
+{applet
+    {compiler-directives careful? = true}
+}
+{import * from COM.CURLR.CRYPTO,
+    location = "../load.scurl"
+}
+
+{import * from CURL.UTIL.BASE64}
+
+|| read a SHAVs test file construct message digests and compare them
+|| header has # to show comments
+
+
+
+{define-class public SHS-TestVector
+  
+  field public vectors:StringStringTable =
+      {StringStringTable}
+  
+  field public msg:StringArray = {StringArray}
+  field public digest:StringArray = {StringArray}
+  field public len:{Array-of int} = {{Array-of int}}
+  field public sha-256-digester:sadSHA-256-Digester
+  field public sha-224-digester:sadSHA-224-Digester
+  field public sha-1-digester:sadSHA-1-Digester
+  
+  field public pass-count:int
+  field public constant results:VBox = {VBox}
+  field public constant test-count-td:TextDisplay = {TextDisplay width = 2cm}
+  field public constant pass-count-td:TextDisplay = {TextDisplay width = 2cm}
+  
+  field public current-digester:int = 1
+  
+  {constructor public {default}
+    || create a SHA-256 digester to create the digests
+    set  self.sha-256-digester = {sadSHA-256-Digester}
+    set  self.sha-224-digester = {sadSHA-224-Digester}
+    set  self.sha-1-digester   = {sadSHA-1-Digester}
+  }
+  
+  {method public {parse-file file:Url}:void
+    {self.reset}
+    let count:int = 0
+    {with-open-streams
+        shs-file = {read-open file} do
+        {while not shs-file.end-of-stream? do
+            {if-non-null b =  {shs-file.read-line} then
+                
+                {b.trim}
+                
+                {if b.size == 0 then {continue}}
+                
+                || equals?
+                {if b[0] == '\[' or
+                    b[0] == '#' then 
+                    {self.results.add b}
+                    {continue}
+                }
+                {if {b.find-string "="} < 0 then {continue}}
+                
+                let (s1:String, s2:String) = {self.parse-assignment b}
+                
+                {if {s1.to-lower-clone} == "len" then
+                    {self.len.append {s2.to-int}}
+                }
+                {if {s1.to-lower-clone} == "msg" then
+                    {self.msg.append s2}
+                }
+                
+                {if {s1.to-lower-clone} == "md" then
+                    {self.digest.append s2}
+                }
+                
+                {inc count}
+                    
+            }
+        }        
+    }
+  }
+  
+  {method {parse-assignment s:StringBuf}:(String, String)
+    let sa:StringArray =
+        {s.split split-chars = {CharClass  "="}}
+    {return
+        {sa[0].trim-clone},
+        {sa[1].trim-clone}
+    }
+  }
+  
+  {method public {run-tests}:void
+    set self.test-count-td.value = {String self.msg.size}
+    
+    set self.pass-count = 0
+    set self.pass-count-td.value = {String self.pass-count}
+    {for i = 0 below self.msg.size do
+        {self.run-test i}
+    }    
+  }
+  
+
+  {method public {run-test index:int}:void
+    
+    let expected:String = self.digest[index]
+    
+    let result:String =
+        {switch self.current-digester
+         case 256 do
+            {{self.sha-256-digester.digest-from-hex-string
+                self.msg[index], limit = self.len[index]
+            }.to-lower-String}
+         case 224 do
+            {{self.sha-224-digester.digest-from-hex-string
+                 self.msg[index], limit = self.len[index]
+             }.to-lower-String}
+         else
+            {{self.sha-1-digester.digest-from-hex-string
+                 self.msg[index], limit = self.len[index]
+             }.to-lower-String}
+        }
+    
+
+    let pass?:bool = (result == expected)
+    {if pass? then
+        {inc self.pass-count}
+        set self.pass-count-td.value = {String self.pass-count}
+    }
+    
+    {self.results.add
+        {VBox
+            {format "string: %w", self.msg[index]},
+            {format "expected: %w",expected},
+            {format "result: %w", result},
+            {if pass? then {text color = "green", PASS}
+             else {bold color = "red", FAILED}
+            },
+            {hrule}
+        }
+    }
+    {dispatch-events false}
+  }
+  
+  {method public {reset}:void
+    {self.results.clear}
+    {self.msg.clear}
+    {self.len.clear}
+    {self.digest.clear}
+    {self.pass-count-td.unset-value}
+    {self.test-count-td.unset-value}
+  }
+}
+
+{let sha-test-files:{HashTable-of String, Url} =
+    {new {HashTable-of String, Url},
+        "SHA-256:short", {url "shabytetestvectors/SHA256ShortMsg.txt"},
+        "SHA-256:long",  {url "shabytetestvectors/SHA256LongMsg.txt"},
+        "SHA-224:short", {url "shabytetestvectors/SHA224ShortMsg.txt"},
+        "SHA-224:long", {url "shabytetestvectors/SHA224LongMsg.txt"},
+        "SHA-1:short",  {url "shabytetestvectors/SHA1ShortMsg.txt"},
+        "SHA-1:long",   {url "shabytetestvectors/SHA1LongMsg.txt"}
+    }
+}
+{value
+    let test-file:#Url
+    let tv:SHS-TestVector = {SHS-TestVector}
+    {VBox height = 10cm, width = 20cm,
+        {HBox valign = "top",
+            {CommandButton label = "reset ...",
+                {on Action do
+                    {tv.reset}
+                }
+            },
+            {CommandButton label = "run tests",
+                {on Action do
+                     {if-non-null tf = test-file  then
+                         {tv.parse-file tf}
+                         {tv.run-tests}
+                     }
+                }
+            },
+            tv.pass-count-td,
+            {bold / },
+            tv.test-count-td,
+            {DropdownList
+                prompt = "select test case",
+                "SHA-256:short", 
+                "SHA-256:long", 
+                "SHA-224:short", 
+                "SHA-224:long", 
+                "SHA-1:short",
+                "SHA-1:long",
+                {on ValueChanged at ddl:DropdownList do
+                    let sel:String = ddl.value asa String
+                    || test file name
+                    set test-file = sha-test-files[sel]
+                    
+                    || digester?
+                    set tv.current-digester =
+                        {if {sel.find-string "256"} >= 0 then
+                            256
+                         elseif {sel.find-string "224"} >= 0 then
+                            224
+                         else
+                            1
+                        }
+                }
+            }
+        },
+        {ScrollBox
+            tv.results
+        }
+    } 
+}
