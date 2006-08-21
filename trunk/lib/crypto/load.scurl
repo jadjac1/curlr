@@ -38,6 +38,9 @@
 {include "bitops.scurl"}
 {include "MD5.scurl"}
 {include "SHA-1.scurl"}
-{include "SHA-256.scurl"}
 {include "SHA-224.scurl"}
+{include "SHA-256.scurl"}
+{include "SHA-384.scurl"}
+{include "SHA-512.scurl"}
+
 {include "HMAC.scurl"}

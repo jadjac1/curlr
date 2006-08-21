@@ -51,6 +51,21 @@
         }
     }
 }
+{doc-next {purpose Return a int64 from the contents of a ByteVec.}}
+{define-proc package inline {ByteVec-to-int64 bv:ByteVec}:int64
+    {return
+        {bit-or
+            {bit-and bv[0], 0xffffffffffffffff},
+            {bit-and {bit-sll bv[1] asa int64, 8} asa int64, 0xffffffffffffffff},
+            {bit-and {bit-sll bv[2] asa int64, 16} asa int64, 0xffffffffffffffff},
+            {bit-and {bit-sll bv[3] asa int64, 24} asa int64, 0xffffffffffffffff},
+            {bit-and {bit-sll bv[4] asa int64, 32} asa int64, 0xffffffffffffffff},
+            {bit-and {bit-sll bv[5] asa int64, 40} asa int64, 0xffffffffffffffff},
+            {bit-and {bit-sll bv[6] asa int64, 48} asa int64, 0xffffffffffffffff},
+            {bit-and {bit-sll bv[7] asa int64, 56} asa int64, 0xffffffffffffffff}  
+        }
+    }
+}
 
 {doc-next {purpose Reverse the byte order in an int32 and return an int32.}}
 {define-proc package inline {int32-reverse i:int32}:int32
@@ -95,6 +110,25 @@
     }
 }
 
+{doc-next {purpose Rotate bits to the left.}}
+{define-proc package {bit64-rol value:int64, count:int}:int64
+    {return
+        {bit-or
+            {bit-sll value, count},
+            {bit-srl value, 64 - count}
+        }
+    }
+}
+
+{doc-next {purpose Rotate bits to the right.}}
+{define-proc public {bit64-ror value:int64, count:int}:int64
+    {return
+        {bit-or
+            {bit-sll value, 64 - count},
+            {bit-srl value, count}
+        }
+    }
+}
 {doc-next {purpose Transform a hex character to a byte vec.}}
 {define-proc public {hex-to-byte c:char}:int
     {if '0' <= c and c <= '9' then

@@ -9,6 +9,8 @@
 ||  HMAC-SHA-1
 ||  HMAC-SHA-224
 ||  HMAC-SHA-256
+||  HMAC-SHA-384
+||  HMAC-SHA-512
 ||
 || Distributed under the New BSD License:
 |#
@@ -69,7 +71,7 @@
     || then use a hash of the key.
     {if in-key.size > self.block-size then
         let new-key:ByteVec =
-             {ByteVec.from-size self.block-size , 0}
+            {ByteVec.from-size self.block-size , 0}
         
         let bv:ByteVec = {self.hash in-key}
         
@@ -95,6 +97,7 @@
   {method public {digest-from-string 
                      key:String, 
                      text:String, 
+                     truncate:int = -1,  || automatically set to the number of bytes
                      character-encoding:CharEncoding = CharEncoding.utf8
                  }:String
     
@@ -105,7 +108,7 @@
     {encode-characters  text, text-bv, character-encoding, out-start=0}
     
     let digest-bv:ByteVec =
-        {self.digest-from-ByteVec key-bv, text-bv}
+        {self.digest-from-ByteVec key-bv, text-bv, truncate = {if truncate == -1 then key-bv.size else truncate}}
     
     let (nbytes:int, digest-string:String) =
         {decode-characters digest-bv, character-encoding}
@@ -114,7 +117,7 @@
   }
   
   {doc-next {purpose Return the HMAC digest as a ByteVec.}}
-  {method public {digest-from-ByteVec key:ByteVec, text:ByteVec}:ByteVec
+  {method public {digest-from-ByteVec key:ByteVec, text:ByteVec, truncate:int = key.size}:ByteVec
     || steps 1 - 3
     let mac-key:ByteVec = {self.key-fixup key}
     || step 4
@@ -138,6 +141,11 @@
     
     || step 9
     let hash-outer:ByteVec = {self.hash outer}
+    
+    || truncate if necessary
+    {if hash-outer.size > truncate then
+        {hash-outer.remove truncate, length = hash-outer.size - truncate}
+    }
     
     {return hash-outer}
   }
@@ -244,3 +252,47 @@
   }
   
 } || class HMAC-SHA-256
+
+{define-class public HMAC-SHA-384 {inherits BaseHMAC}
+  
+  field private digester:sadSHA-384-Digester = {sadSHA-384-Digester}
+  
+  {constructor public {default}
+    {construct-super 128, 48}
+  }
+  
+  {method protected {hash bv:ByteVec}:ByteVec
+    
+    let digest:sadSHA-384-Digest =
+        {self.digester.digest-from-byte-stream
+            {new {InputStream-of-from byte, ByteVec}, bv}
+        }
+    
+    let obv:ByteVec = {ByteVec-from-hex-string {{String digest}.to-lower-clone}}
+    
+    {return obv}
+  }
+  
+} || class HMAC-SHA-384
+
+{define-class public HMAC-SHA-512 {inherits BaseHMAC}
+  
+  field private digester:sadSHA-512-Digester = {sadSHA-512-Digester}
+  
+  {constructor public {default}
+    {construct-super 128, 64}
+  }
+  
+  {method protected {hash bv:ByteVec}:ByteVec
+    
+    let digest:sadSHA-512-Digest =
+        {self.digester.digest-from-byte-stream
+            {new {InputStream-of-from byte, ByteVec}, bv}
+        }
+    
+    let obv:ByteVec = {ByteVec-from-hex-string {{String digest}.to-lower-clone}}
+    
+    {return obv}
+  }
+  
+} || class HMAC-SHA-512
