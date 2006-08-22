@@ -1,0 +1,57 @@
+{curl 4.0 applet}
+{curl-file-attributes character-encoding = "utf8"}
+{applet 
+    {compiler-directives
+        careful? = true
+    }    
+}
+
+{import * from COM.CURLR.CRYPTO,
+    location = "../load.scurl"
+}
+
+{let test-vectors:StringStringTable =
+    {StringStringTable
+        "", "d41d8cd98f00b204e9800998ecf8427e",
+        "a", "0cc175b9c0f1b6a831c399e269772661",
+        "abc", "900150983cd24fb0d6963f7d28e17f72",
+        "message digest", "f96b697d7cb7938d525a2f31aaf161d0",
+        "abcdefghijklmnopqrstuvwxyz", "c3fcd3d76192e4007dfb496cca67e13b",
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789", "d174ab98d277d9f5a5611c2c9f419d9f",
+        "12345678901234567890123456789012345678901234567890123456789012345678901234567890", "57edf4a22be3c955ac49da2e2107b67a"
+    }
+}
+        
+{value
+    || a display box
+    let results:VBox = {VBox}
+    
+    || create a MD5 digester to create the digests
+    let md5-digester:sadMD5-Digester = {sadMD5-Digester}
+    
+    {for expected:String key test-string:String in test-vectors do
+        || create a digest for the string
+        let digest:sadMD5-Digest = {md5-digester.digest-from-string test-string}
+        
+
+        || create a clone of the digest string
+        let result:String = {digest.to-lower-String}
+
+        || compare the result
+        let pass?:bool = result == expected
+
+        {results.add
+            {VBox
+                {format "string: %w", test-string},
+                {format "expected: %w",expected},
+                {format "result: %w", result},
+                {if pass? then {text color = "green", PASS}
+                 else {bold color = "red", FAILED}
+                },
+                {hrule}
+            }
+        }
+    }
+    
+    results
+}
