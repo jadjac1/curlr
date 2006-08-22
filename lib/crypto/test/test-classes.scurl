@@ -1,0 +1,766 @@
+|| test-classes.curl
+|| maintained by: sadman
+||
+|| Simple test utilities for COM.CURLR.CRYPTO based on SHAVS and HMACVS pre-validation tests.
+|| Note: these are simple test classes and do not handle the Response / Request formats required
+|| for validation certification.
+
+||
+|| Distributed under the New BSD License:
+|#
+  Copyright (c) 2006, Steve Adams
+  All rights reserved.
+
+  Redistribution and use in source and binary forms, with or without modification, are permitted 
+  provided that the following conditions are met:
+
+    * Redistributions of source code must retain the above copyright notice, this list of conditions 
+      and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright notice, this list of conditions 
+      and the following disclaimer in the documentation and/or other materials provided with the distribution.
+    * Neither the name of the <ORGANIZATION> nor the names of its contributors may be used to endorse or promote products 
+      derived from this software without specific prior written permission.
+
+  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED 
+  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A 
+  PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY 
+  DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, 
+  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) 
+  HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT 
+  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, 
+  EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#|
+
+|| Base class for the test utilities
+{define-class abstract public BaseTestVector {inherits Dialog}
+  
+  || HMACVS test files (broken out of the original file from NIST)
+  field public constant sha-test-files:{HashTable-of String, Url} 
+
+  field public constant test-cases:StringArray = {StringArray}
+  
+  field public vectors:StringStringTable =
+      {StringStringTable}
+  field public header:StringArray = {StringArray}
+  
+  field public msg:StringArray = {StringArray}
+  field public pass-count:int
+  field public test-count:int
+  field public constant results:VBox = {VBox}
+  field public constant test-count-td:TextDisplay = {TextDisplay width = 2cm}
+  field public constant pass-count-td:TextDisplay = {TextDisplay width = 2cm}
+  field public constant test-selector:DropdownList
+  field public constant run-test-cb:CommandButton
+  field public show-fail-only?:bool = true
+  field public current-test-case:String = ""
+  field public current-digester:int = 1
+  
+  
+  {constructor public {default 
+                          sha-test-files:{HashTable-of String, Url} ,
+                          ...
+                      }
+    set self.sha-test-files = sha-test-files
+    || get ordered list of test cases
+    {for key name in self.sha-test-files do
+        {self.test-cases.append name}
+    }
+    {self.test-cases.sort}
+
+    
+    || create the controls
+    set self.test-selector =
+        {DropdownList
+            prompt = "select test case",
+            "run all tests", {splice self.test-cases},
+            {on ValueChanged at ddl:DropdownList do
+                set self.current-test-case = ddl.value asa String
+            }
+        }
+    
+    set self.run-test-cb =
+        {CommandButton label = "run test",
+            {on Action do
+                {if not self.test-selector.has-value? then 
+                    {self.results.add
+                        {bold color="red", No tests selected.}
+                    }
+                    {return}
+                }
+
+                {if self.test-selector.value asa String == "run all tests" then
+                    {self.run-all-test-cases}
+                 else
+                    {self.reset-for-test-case}
+                    {self.run-test-case self.current-test-case}
+                }
+            }
+        }
+    
+    {construct-super.Dialog
+        {self.make-display},
+        {splice ...}
+    }
+  }
+  
+  || parse the contents of a test files
+  {method public {parse-file file:Url}:void
+    let count:int = 0
+    {with-open-streams
+        shs-file = {read-open file} do
+        {while not shs-file.end-of-stream? do
+            {if-non-null b =  {shs-file.read-line} then
+                
+                {b.trim}
+                
+                {if b.size == 0 then {continue}}
+                
+                || equals?
+                {if b[0] == '\[' or
+                    b[0] == '#' then 
+                    {self.header.append {b.to-String}}
+                    {continue}
+                }
+                {if {b.find-string "="} < 0 then {continue}}
+                
+                let (s1:String, s2:String) = {self.parse-assignment b}
+
+                {self.handle-assignment-line {s1.to-lower-clone}, {s2.to-lower-clone}}
+                
+                {inc count}
+                
+            }
+        }        
+    }
+  }
+  
+  {method public {handle-assignment-line s1:String, s2:String}:void
+    {if s1 == "msg" then
+        {self.msg.append s2}
+    }
+  }
+  
+  || simple parsing of "x   =  y"
+  {method {parse-assignment s:StringBuf}:(String, String)
+    let sa:StringArray =
+        {s.split split-chars = {CharClass  "="}}
+    {return
+        {sa[0].trim-clone},
+        {sa[1].trim-clone}
+    }
+  }
+  
+  || run all test instances for the current test case
+  {method public {run-tests}:void
+    
+    set self.test-count = self.msg.size
+    set self.test-count-td.value = {String self.test-count}
+    set self.pass-count = 0
+    set self.pass-count-td.value = {String self.pass-count}
+    {for i = 0 below self.msg.size do
+        {self.run-test i}
+    }    
+  }
+
+  || run a single test instance from a test case
+  {method abstract public {run-test index:int}:void
+  }
+  
+  || clear test results, ready for a test run
+  {method public {reset-for-test-case}:void
+    set self.test-count = 0
+    set self.pass-count = 0
+    {self.header.clear}
+    {self.pass-count-td.unset-value}
+    {self.test-count-td.unset-value}
+  }
+  
+  || clear the display and the test results
+  {method public {reset-all}:void
+    {self.reset-for-test-case}
+    {self.results.clear}
+  }
+  
+  {method public {report-error txt:String}:void
+    {self.results.add
+        {bold color="red", {value txt}}
+    }
+  }
+  
+  || run all the tests
+  {method public {run-all-test-cases}:void
+    {for test-case in self.test-cases do
+        {self.reset-for-test-case}
+        {self.run-test-case test-case}
+    }    
+  }
+  
+  || run a single test case
+  {method {run-test-case test-case:String}:void
+    
+    {if not {self.sha-test-files.key-exists? test-case} then
+        {self.report-error {message Unknown test case {value test-case}}}
+        {return}
+    }
+
+    
+    let tf:Url = self.sha-test-files[test-case]
+    
+    {self.parse-file tf}
+    {self.display-header}
+    
+    {self.run-tests}
+    {self.display-finished-message}
+  }
+  
+  || put the parsed header into the display
+  {method {display-header}:void
+    {for s in self.header do
+        {self.results.add s}
+    }  
+    {dispatch-events false}
+  }
+  
+  {method {display-finished-message}:void
+    let prate:Percent = self.pass-count / self.test-count
+    
+    {self.results.add
+        {VBox
+            color =
+                {if prate != 1.0 then "red"
+                 else "black"
+                },
+            {bold Completed test case {value self.current-test-case}. pass rate = {value self.pass-count} / {value self.test-count}},
+            {hrule}
+        }
+    }
+    {dispatch-events false}
+  }
+  
+  || dialog display
+  {method abstract public {make-display}:Graphic
+  }
+} || BaseTestVector
+
+|| Class for running HMACVS tests
+{define-class public HMACVS-TestVector {inherits BaseTestVector}
+  
+  field public mac:StringArray = {StringArray}
+  field public key:StringArray = {StringArray}
+  field public key-len:{Array-of int} = {{Array-of int}}
+  field public trunc-len:{Array-of int} = {{Array-of int}}
+  field public count:{Array-of int} = {{Array-of int}}
+  field public hmac-sha-512:HMAC-SHA-512
+  field public hmac-sha-384:HMAC-SHA-384
+  field public hmac-sha-256:HMAC-SHA-256
+  field public hmac-sha-224:HMAC-SHA-224
+  field public hmac-sha-1:HMAC-SHA-1
+  
+  
+  {constructor public {default ...}
+
+    set  self.hmac-sha-512 = {HMAC-SHA-512}
+    set  self.hmac-sha-384 = {HMAC-SHA-384}
+    set  self.hmac-sha-256 = {HMAC-SHA-256}
+    set  self.hmac-sha-224 = {HMAC-SHA-224}
+    set  self.hmac-sha-1 = {HMAC-SHA-1}
+
+    {construct-super 
+        {new {HashTable-of String, Url},
+            "HMAC-SHA-512", {url "hmactestvectors/HMAC-SHA512.txt"},
+            "HMAC-SHA-384", {url "hmactestvectors/HMAC-SHA384.txt"},
+            "HMAC-SHA-256", {url "hmactestvectors/HMAC-SHA256.txt"},
+            "HMAC-SHA-224", {url "hmactestvectors/HMAC-SHA224.txt"},
+            "HMAC-SHA-1", {url "hmactestvectors/HMAC-SHA1.txt"}
+        }
+    }
+  }
+  
+  || parse the contents of a HMACVS files
+  {method public {parse-file file:Url}:void
+    let count:int = 0
+    {with-open-streams
+        shs-file = {read-open file} do
+        {while not shs-file.end-of-stream? do
+            {if-non-null b =  {shs-file.read-line} then
+                
+                {b.trim}
+                
+                {if b.size == 0 then {continue}}
+                
+                || equals?
+                {if b[0] == '\[' or
+                    b[0] == '#' then 
+                    {self.header.append {b.to-String}}
+                    {continue}
+                }
+                {if {b.find-string "="} < 0 then {continue}}
+                
+                let (s1:String, s2:String) = {self.parse-assignment b}
+
+                {if {s1.to-lower-clone} == "count" then
+                    {self.count.append {s2.to-int}}
+                }
+                {if {s1.to-lower-clone} == "tlen" then
+                    {self.trunc-len.append {s2.to-int}}
+                }
+                {if {s1.to-lower-clone} == "klen" then
+                    {self.key-len.append {s2.to-int}}
+                }
+                {if {s1.to-lower-clone} == "msg" then
+                    {self.msg.append s2}
+                }
+                {if {s1.to-lower-clone} == "key" then
+                    {self.key.append s2}
+                }
+                {if {s1.to-lower-clone} == "mac" then
+                    {self.mac.append s2}
+                }
+                
+                {inc count}
+                
+            }
+        }        
+    }
+  }
+  
+  {method public {handle-assignment-line s1:String, s2:String}:void
+    {if s1 == "count" then
+        {self.count.append {s2.to-int}}
+    }
+    {if s1 == "tlen" then
+        {self.trunc-len.append {s2.to-int}}
+    }
+    {if s1 == "klen" then
+        {self.key-len.append {s2.to-int}}
+    }
+    {if s1 == "msg" then
+        {self.msg.append s2}
+    }
+    {if s1 == "key" then
+        {self.key.append s2}
+    }
+    {if s1 == "mac" then
+        {self.mac.append s2}
+    }
+  }
+  
+
+
+  || run a single test instance from a test case
+  {method public {run-test index:int}:void
+    {if index > self.mac.size then
+        {self.report-error
+            "Test not found"
+        }
+    }
+    let expected:String = self.mac[index]
+    
+    let result:String =
+        {switch self.current-digester
+         case 512 do
+            {ByteVec-to-hex-string
+                {self.hmac-sha-512.digest-from-ByteVec
+                    {ByteVec-from-hex-string self.key[index]},
+                    {ByteVec-from-hex-string self.msg[index]},
+                    truncate = self.trunc-len[index]
+                }
+            }
+         case 384 do
+            {ByteVec-to-hex-string
+                {self.hmac-sha-384.digest-from-ByteVec
+                    {ByteVec-from-hex-string self.key[index]},
+                    {ByteVec-from-hex-string self.msg[index]},
+                    truncate = self.trunc-len[index]
+                }
+            }
+         case 256 do
+            {ByteVec-to-hex-string
+                {self.hmac-sha-256.digest-from-ByteVec
+                    {ByteVec-from-hex-string self.key[index]},
+                    {ByteVec-from-hex-string self.msg[index]},
+                    truncate = self.trunc-len[index]
+                }
+            }
+         case 224 do
+            {ByteVec-to-hex-string
+                {self.hmac-sha-224.digest-from-ByteVec
+                    {ByteVec-from-hex-string self.key[index]},
+                    {ByteVec-from-hex-string self.msg[index]},
+                    truncate = self.trunc-len[index]
+                }
+            }
+         else
+            {ByteVec-to-hex-string
+                {self.hmac-sha-1.digest-from-ByteVec
+                    {ByteVec-from-hex-string self.key[index]},
+                    {ByteVec-from-hex-string self.msg[index]},
+                    truncate = self.trunc-len[index]
+                }
+            }
+        }
+    
+    set result = {result.to-lower-clone}
+    let pass?:bool = (result == expected)
+    {if pass? then
+        {inc self.pass-count}
+        set self.pass-count-td.value = {String self.pass-count}
+    }
+    {if not self.show-fail-only? or not pass? then
+        {self.results.add
+            {VBox
+                {format "string: %w", self.msg[index]},
+                {format "expected: %w",expected},
+                {format "result: %w", result},
+                {if pass? then {text color = "green", PASS}
+                 else {bold color = "red", FAILED}
+                },
+                {hrule}
+            }
+        }
+    }
+    {dispatch-events false}
+  }
+  
+  || clear test results, ready for a test run
+  {method public {reset-for-test-case}:void
+    {super.reset-for-test-case}
+    {self.msg.clear}
+    {self.key-len.clear}
+    {self.trunc-len.clear}
+    {self.mac.clear}
+    {self.key.clear}
+  }
+  
+  
+  || run a single test case
+  {method {run-test-case test-case:String}:void
+    || digester?
+    set self.current-digester =
+        {if {test-case.find-string "512"} >= 0 then
+            512
+         elseif {test-case.find-string "384"} >= 0 then
+            384
+         elseif {test-case.find-string "256"} >= 0 then
+            256
+         elseif {test-case.find-string "224"} >= 0 then
+            224
+         else
+            1
+        }
+    
+    {super.run-test-case test-case}
+  }
+  
+  
+  || dialog display
+  {method public {make-display}:Graphic
+    {return
+        {VBox height = 15cm, width = 20cm, border-color="black", border-width = 1px,
+            {bold COM.CURLR.CRYPTO tests for HMAC implementations.},
+            {paragraph This utility runs the pre-validation tests for the NIST {link href={url "http://csrc.nist.gov/cryptval/mac/HMACVS.pdf"},
+                HMAC Validation System.}
+            },
+            {paragraph Passing these tests does NOT constitute validation of the implementation.},
+            
+            
+            {HBox valign = "top",
+                {CommandButton label = "reset ...",
+                    {on Action do
+                        {self.reset-all}
+                    }
+                },
+                self.run-test-cb,
+                self.test-selector,
+                {CheckButton label = "show fail only?",
+                    value = true,
+                    {on ValueChanged at cb:CheckButton do
+                        set self.show-fail-only? = cb.value
+                    }
+                },
+                self.pass-count-td,
+                {bold / },
+                self.test-count-td
+
+            },
+            {ScrollBox
+                background = "white",
+                self.results
+            }
+        } 
+    }
+  }
+} || HMACVS-TestVector
+
+|| Class for running SHAVS tests
+{define-class public SHAVS-TestVector {inherits BaseTestVector}
+  
+
+  field public seed:String = ""
+  field public digest:StringArray = {StringArray}
+  field public len:{Array-of int} = {{Array-of int}}
+  field public count:{Array-of int} = {{Array-of int}}
+  field public sha-512-digester:sadSHA-512-Digester
+  field public sha-384-digester:sadSHA-384-Digester
+  field public sha-256-digester:sadSHA-256-Digester
+  field public sha-224-digester:sadSHA-224-Digester
+  field public sha-1-digester:sadSHA-1-Digester
+  
+  {constructor public {default ...}
+
+    || create a digesters to create the digests
+    set  self.sha-512-digester = {sadSHA-512-Digester}
+    set  self.sha-384-digester = {sadSHA-384-Digester}
+    set  self.sha-256-digester = {sadSHA-256-Digester}
+    set  self.sha-224-digester = {sadSHA-224-Digester}
+    set  self.sha-1-digester   = {sadSHA-1-Digester}
+    
+    
+    {construct-super
+        {new {HashTable-of String, Url},
+            "SHA-512:long", {url "shabytetestvectors/SHA512LongMsg.txt"},
+            "SHA-512:short", {url "shabytetestvectors/SHA512ShortMsg.txt"},
+            "SHA-512:monte",   {url "shabytetestvectors/SHA512Monte.txt"},
+            
+            "SHA-384:long", {url "shabytetestvectors/SHA384LongMsg.txt"},
+            "SHA-384:short", {url "shabytetestvectors/SHA384ShortMsg.txt"},
+            "SHA-384:monte",   {url "shabytetestvectors/SHA384Monte.txt"},
+            
+            "SHA-256:short", {url "shabytetestvectors/SHA256ShortMsg.txt"},
+            "SHA-256:long",  {url "shabytetestvectors/SHA256LongMsg.txt"},
+            "SHA-256:monte",  {url "shabytetestvectors/SHA256Monte.txt"},
+            
+            "SHA-224:short", {url "shabytetestvectors/SHA224ShortMsg.txt"},
+            "SHA-224:long", {url "shabytetestvectors/SHA224LongMsg.txt"},
+            "SHA-224:monte",  {url "shabytetestvectors/SHA224Monte.txt"},
+            
+            "SHA-1:short",  {url "shabytetestvectors/SHA1ShortMsg.txt"},
+            "SHA-1:long",   {url "shabytetestvectors/SHA1LongMsg.txt"},
+            "SHA-1:monte",   {url "shabytetestvectors/SHA1Monte.txt"}
+        },
+        {splice ...}
+    }
+  }
+  
+  {method public {handle-assignment-line s1:String, s2:String}:void
+    {if s1 == "seed" then
+        set self.seed = s2
+    }
+    {if s1 == "count" then
+        {self.count.append {s2.to-int}}
+    }
+    {if s1 == "len" then
+        {self.len.append {s2.to-int}}
+    }
+    {if s1 == "msg" then
+        {self.msg.append s2}
+    }
+    
+    {if s1 == "md" then
+        {self.digest.append s2}
+    }
+  }
+  
+  {method public {run-pseudo-random-tests}:void
+    let seed:String = self.seed
+    set self.test-count = self.digest.size
+    set self.test-count-td.value = {String self.test-count}
+    set self.pass-count = 0
+    set self.pass-count-td.value = {String self.pass-count}
+
+    let digests:StringVec = {StringVec.from-size 1003, ""}
+    {for j = 0 to 99 do
+        {for i = 0 below 3 do
+            set digests[i] = seed
+        }
+        {for i = 3 below 1003 do
+            let mi:String = digests[i - 3] & digests[i - 2] & digests[i - 1]
+            set digests[i] = 
+                {switch self.current-digester
+                 case 512 do
+                    {{self.sha-512-digester.digest-from-hex-string
+                         mi
+                     }.to-lower-String}
+                 case 384 do
+                    {{self.sha-384-digester.digest-from-hex-string
+                         mi
+                     }.to-lower-String}
+                 case 256 do
+                    {{self.sha-256-digester.digest-from-hex-string
+                         mi
+                     }.to-lower-String}
+                 case 224 do
+                    {{self.sha-224-digester.digest-from-hex-string
+                         mi
+                     }.to-lower-String}
+                 else
+                    {{self.sha-1-digester.digest-from-hex-string
+                         mi
+                     }.to-lower-String}
+                }
+            set seed = digests[i]
+        }
+        {self.compare-pseudo-random-result seed, j}
+    }
+    
+  }
+  
+  {method public {compare-pseudo-random-result result:String, index:int}:void
+    
+    let expected:String = self.digest[index]
+    let pass?:bool = (result == expected)
+    {if pass? then
+        {inc self.pass-count}
+        set self.pass-count-td.value = {String self.pass-count}
+    }
+    
+    {if not self.show-fail-only? or not pass? then
+        {self.results.add
+            {VBox
+                {format "iteration #: %d", index},
+                {format "expected: %w",expected},
+                {format "result: %w", result},
+                {if pass? then {text color = "green", PASS}
+                 else {bold color = "red", FAILED}
+                },
+                {hrule}
+            }
+        }
+    }
+    {dispatch-events false}
+  }
+  
+
+  {method public {run-test index:int}:void
+    
+    let expected:String = self.digest[index]
+    
+    let result:String =
+        {switch self.current-digester
+         case 512 do
+            {{self.sha-512-digester.digest-from-hex-string
+                 self.msg[index], limit = self.len[index]
+             }.to-lower-String}
+         case 384 do
+            {{self.sha-384-digester.digest-from-hex-string
+                 self.msg[index], limit = self.len[index]
+             }.to-lower-String}
+         case 256 do
+            {{self.sha-256-digester.digest-from-hex-string
+                 self.msg[index], limit = self.len[index]
+             }.to-lower-String}
+         case 224 do
+            {{self.sha-224-digester.digest-from-hex-string
+                 self.msg[index], limit = self.len[index]
+             }.to-lower-String}
+         else
+            {{self.sha-1-digester.digest-from-hex-string
+                 self.msg[index], limit = self.len[index]
+             }.to-lower-String}
+        }
+    
+
+    let pass?:bool = (result == expected)
+    {if pass? then
+        {inc self.pass-count}
+        set self.pass-count-td.value = {String self.pass-count}
+    }
+    {if not self.show-fail-only? or not pass? then
+        {self.results.add
+            {VBox
+                {format "string: %w", self.msg[index]},
+                {format "expected: %w",expected},
+                {format "result: %w", result},
+                {if pass? then {text color = "green", PASS}
+                 else {bold color = "red", FAILED}
+                },
+                {hrule}
+            }
+        }
+    }
+    {dispatch-events false}
+  }
+  
+  {method public {reset-for-test-case}:void
+    {super.reset-for-test-case}
+    {self.header.clear}
+    {self.msg.clear}
+    {self.len.clear}
+    {self.digest.clear}
+  }
+  
+  
+  
+  {method public {run-test-case test-case:String}:void
+    {if not {self.sha-test-files.key-exists? test-case} then
+        {self.results.add
+            {bold color = "red", Unknown test case {value test-case}}
+        }
+        {return}
+    }
+    
+    let tf:Url = self.sha-test-files[test-case]
+    
+    || digester?
+    set self.current-digester =
+        {if {test-case.find-string "512"} >= 0 then
+            512
+         elseif {test-case.find-string "384"} >= 0 then
+            384
+         elseif {test-case.find-string "256"} >= 0 then
+            256
+         elseif {test-case.find-string "224"} >= 0 then
+            224
+         else
+            1
+        }
+    
+    {self.parse-file tf}
+    {self.display-header}
+    
+    || pseudo-random?
+    {if {test-case.find-string "monte"} >= 0 then
+        {self.run-pseudo-random-tests}
+     else
+        {self.run-tests}
+    }
+    {self.display-finished-message}
+  }
+  
+  {method public {make-display}:Graphic
+    {return
+        {VBox height = 15cm, width = 20cm, border-color="black", border-width = 1px,
+            {bold COM.CURLR.CRYPTO tests for SHA implementations.},
+            {paragraph This utility runs the pre-validation tests for the NIST {link href={url "http://csrc.nist.gov/cryptval/shs/SHAVS.pdf"},
+                SHA Validation System.}
+            },
+            {paragraph Passing these tests does NOT constitute validation of the implementation.},
+            
+            
+            {HBox valign = "top",
+                {CommandButton label = "reset ...",
+                    {on Action do
+                        {self.reset-all}
+                    }
+                },
+                self.run-test-cb,
+                self.test-selector,
+                {CheckButton label = "show fail only?",
+                    value = true,
+                    {on ValueChanged at cb:CheckButton do
+                        set self.show-fail-only? = cb.value
+                    }
+                },
+                self.pass-count-td,
+                {bold / },
+                self.test-count-td
+
+            },
+            {ScrollBox
+                background = "white",
+                self.results
+            }
+        } 
+    }
+  }
+} || class SHAVS-TestVector

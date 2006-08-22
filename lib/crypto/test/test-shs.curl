@@ -1,6 +1,9 @@
-|| package COM.CURLR.CRYPTO
+|| test-shs.curl
 || maintained by: sadman
+||
+|| All SHS test cases for SHAVS and HMACVS
 
+||
 || Distributed under the New BSD License:
 |#
   Copyright (c) 2006, Steve Adams
@@ -25,25 +28,23 @@
   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, 
   EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #|
-{curl 4.0 package}
+{curl 4.0 applet}
 {curl-file-attributes character-encoding = "utf8"}
-{package COM.CURLR.CRYPTO,
-    {compiler-directives careful? = true},
-    version = "1.0",
-    author = "Steve Adams"
+{applet
+    {compiler-directives careful? = true}
 }
+|| import only the package to be tested
+{import * from COM.CURLR.CRYPTO,
+    location = "../load.scurl"
+}
+|| the test classes
+{include "test-classes.scurl"}
 
-|| for Curl base classes MsgDigest, etc..
-|| public so that importing this package also improts the Curl package.
-{import public * from CURL.CRYPTO.MSG-DIGEST}
-
-|| files that make up the package
-{include "bitops.scurl"}
-{include "MD5.scurl"}
-{include "SHA-1.scurl"}
-{include "SHA-224.scurl"}
-{include "SHA-256.scurl"}
-{include "SHA-384.scurl"}
-{include "SHA-512.scurl"}
-
-{include "HMAC.scurl"}
+|| show the test dialog
+{spaced-hbox
+    width = 30cm,
+    valign="top",    
+    {HMACVS-TestVector},
+    {SHAVS-TestVector}
+}
+   
