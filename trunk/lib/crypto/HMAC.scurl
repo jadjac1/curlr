@@ -99,7 +99,7 @@
                      text:String, 
                      truncate:int = -1,  || automatically set to the number of bytes
                      character-encoding:CharEncoding = CharEncoding.utf8
-                 }:String
+                 }:ByteVec
     
     let key-bv:ByteVec = {ByteVec.from-size key.size , 0}
     {encode-characters  key, key-bv, character-encoding, out-start=0}
@@ -110,10 +110,7 @@
     let digest-bv:ByteVec =
         {self.digest-from-ByteVec key-bv, text-bv, truncate = {if truncate == -1 then key-bv.size else truncate}}
     
-    let (nbytes:int, digest-string:String) =
-        {decode-characters digest-bv, character-encoding}
-    
-    {return digest-string}
+    {return digest-bv}
   }
   
   {doc-next {purpose Return the HMAC digest as a ByteVec.}}
@@ -168,6 +165,7 @@
 {define-class public HMAC-MD5 {inherits BaseHMAC}
   
   field private digester:sadMD5-Digester = {sadMD5-Digester}
+  field public-get private-set digest:#sadMD5-Digest
   
   {constructor public {default}
     {construct-super 64, 16}
@@ -175,12 +173,12 @@
   
   {method protected {hash bv:ByteVec}:ByteVec
     
-    let digest:sadMD5-Digest =
+    set self.digest =
         {self.digester.digest-from-byte-stream
             {new {InputStream-of-from byte, ByteVec}, bv}
         }
     
-    let obv:ByteVec = {ByteVec-from-hex-string {{String digest}.to-lower-clone}}
+    let obv:ByteVec = {ByteVec-from-hex-string {{String self.digest}.to-lower-clone}}
     
     {return obv}
   }
@@ -190,6 +188,7 @@
 {define-class public HMAC-SHA-1 {inherits BaseHMAC}
   
   field private digester:sadSHA-1-Digester = {sadSHA-1-Digester}
+  field public-get private-set digest:#sadSHA-1-Digest
   
   {constructor public {default}
     {construct-super 64, 20}
@@ -197,12 +196,12 @@
   
   {method protected {hash bv:ByteVec}:ByteVec
     
-    let digest:sadSHA-1-Digest =
+    set self.digest =
         {self.digester.digest-from-byte-stream
             {new {InputStream-of-from byte, ByteVec}, bv}
         }
     
-    let obv:ByteVec = {ByteVec-from-hex-string {{String digest}.to-lower-clone}}
+    let obv:ByteVec = {ByteVec-from-hex-string {{String self.digest}.to-lower-clone}}
     
     {return obv}
   }
@@ -212,6 +211,7 @@
 {define-class public HMAC-SHA-224 {inherits BaseHMAC}
   
   field private digester:sadSHA-224-Digester = {sadSHA-224-Digester}
+  field public-get private-set digest:#sadSHA-224-Digest
   
   {constructor public {default}
     {construct-super 64, 32}
@@ -219,12 +219,12 @@
   
   {method protected {hash bv:ByteVec}:ByteVec
     
-    let digest:sadSHA-224-Digest =
+    set self.digest =
         {self.digester.digest-from-byte-stream
             {new {InputStream-of-from byte, ByteVec}, bv}
         }
     
-    let obv:ByteVec = {ByteVec-from-hex-string {{String digest}.to-lower-clone}}
+    let obv:ByteVec = {ByteVec-from-hex-string {{String self.digest}.to-lower-clone}}
     
     {return obv}
   }
@@ -234,6 +234,7 @@
 {define-class public HMAC-SHA-256 {inherits BaseHMAC}
   
   field private digester:sadSHA-256-Digester = {sadSHA-256-Digester}
+  field public-get private-set digest:#sadSHA-256-Digest
   
   {constructor public {default}
     {construct-super 64, 32}
@@ -241,12 +242,12 @@
   
   {method protected {hash bv:ByteVec}:ByteVec
     
-    let digest:sadSHA-256-Digest =
+    set self.digest =
         {self.digester.digest-from-byte-stream
             {new {InputStream-of-from byte, ByteVec}, bv}
         }
     
-    let obv:ByteVec = {ByteVec-from-hex-string {{String digest}.to-lower-clone}}
+    let obv:ByteVec = {ByteVec-from-hex-string {{String self.digest}.to-lower-clone}}
     
     {return obv}
   }
@@ -256,6 +257,7 @@
 {define-class public HMAC-SHA-384 {inherits BaseHMAC}
   
   field private digester:sadSHA-384-Digester = {sadSHA-384-Digester}
+  field public-get private-set digest:#sadSHA-384-Digest
   
   {constructor public {default}
     {construct-super 128, 48}
@@ -263,12 +265,12 @@
   
   {method protected {hash bv:ByteVec}:ByteVec
     
-    let digest:sadSHA-384-Digest =
+    set self.digest =
         {self.digester.digest-from-byte-stream
             {new {InputStream-of-from byte, ByteVec}, bv}
         }
     
-    let obv:ByteVec = {ByteVec-from-hex-string {{String digest}.to-lower-clone}}
+    let obv:ByteVec = {ByteVec-from-hex-string {{String self.digest}.to-lower-clone}}
     
     {return obv}
   }
@@ -278,6 +280,7 @@
 {define-class public HMAC-SHA-512 {inherits BaseHMAC}
   
   field private digester:sadSHA-512-Digester = {sadSHA-512-Digester}
+  field public-get private-set digest:#sadSHA-512-Digest
   
   {constructor public {default}
     {construct-super 128, 64}
@@ -285,12 +288,12 @@
   
   {method protected {hash bv:ByteVec}:ByteVec
     
-    let digest:sadSHA-512-Digest =
+    set self.digest =
         {self.digester.digest-from-byte-stream
             {new {InputStream-of-from byte, ByteVec}, bv}
         }
     
-    let obv:ByteVec = {ByteVec-from-hex-string {{String digest}.to-lower-clone}}
+    let obv:ByteVec = {ByteVec-from-hex-string {{String self.digest}.to-lower-clone}}
     
     {return obv}
   }
