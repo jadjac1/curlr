@@ -1,0 +1,124 @@
+|| sadXMLDom.scurl
+|| maintained by: sadman
+||
+|| Simple class for an XML DOM
+|| 
+|| Distributed under the New BSD License:
+|#
+  Copyright (c) 2006, Steve Adams
+  All rights reserved.
+
+  Redistribution and use in source and binary forms, with or without modification, are permitted 
+  provided that the following conditions are met:
+
+    * Redistributions of source code must retain the above copyright notice, this list of conditions 
+      and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright notice, this list of conditions 
+      and the following disclaimer in the documentation and/or other materials provided with the distribution.
+    * Neither the name of the <ORGANIZATION> nor the names of its contributors may be used to endorse or promote products 
+      derived from this software without specific prior written permission.
+
+  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED 
+  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A 
+  PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY 
+  DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, 
+  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) 
+  HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT 
+  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, 
+  EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#|
+{curl-file-attributes character-encoding = "utf8"}
+
+
+{define-class public sadXMLDom
+  
+  || root of a parsed XML tree
+  field public-get protected-set root:#sadXMLNode
+  
+  || idenification of the id element - i.e. the attribute name to be
+  || used in searches for id
+  field public id-str:String = "id"
+  
+  field public name-str:String = "name"
+  
+  field public-get protected-set parser:sadXMLParser = {sadXMLParser}
+  
+  {factory public {from-location
+                      location:Url,
+                      || parameters for a read-open
+                      ...
+                  }:sadXMLDom
+    
+    let dom:sadXMLDom = {sadXMLDom}
+    
+    || open the location for read
+    {with-open-streams
+        tis = {read-open location, {splice ...}} do
+        set dom.root = {dom.parser.parse tis}
+    }
+    {return dom}
+  }
+  
+  {factory public {from-StringBuf
+                      buffer:StringBuf
+                  }:sadXMLDom
+    
+    let dom:sadXMLDom = {sadXMLDom}
+    
+    set dom.root = 
+        {dom.parser.parse 
+            {{TextInputStream-from StringBuf} buffer}
+        }
+
+    {return dom}
+  }
+  
+  || return the first element with the specified id
+  {method public {getElementById id:String}:#sadXMLNode
+    let element:#sadXMLNode = null
+    {self.root.walk-nodes
+        {proc {node:sadXMLNode}:bool
+            let attr-value:String = {node.get-attribute self.id-str}
+            {if attr-value == id then
+                set element = node
+                {return true}
+            }
+            {return false}
+        }
+    }
+    {return element}
+  }
+
+  || return the set of elements that have the specified name
+  {method public {getElementsByName name:String}:{Array-of sadXMLNode}
+    let elements:{Array-of sadXMLNode} = {new {Array-of sadXMLNode}}
+    
+    {self.root.walk-nodes
+        {proc {node:sadXMLNode}:bool
+            let attr-value:String = {node.get-attribute self.name-str}
+            {if attr-value == name then
+                {elements.append node}
+            }
+            {return false}
+        }
+    }
+    {return elements}
+  }  
+  
+  || return the set of elements that have the specified tag name - i.e. local-name for the node
+  {method public {getElementsByTagName tag-name:String}:{Array-of sadXMLNode}
+    let elements:{Array-of sadXMLNode} = {new {Array-of sadXMLNode}}
+    
+    {self.root.walk-nodes
+        {proc {node:sadXMLNode}:bool
+            {if node.local-name == tag-name then
+                {elements.append node}
+            }
+            {return false}
+        }
+    }
+    
+    {return elements}
+  }
+  
+} || sadXMlDom
