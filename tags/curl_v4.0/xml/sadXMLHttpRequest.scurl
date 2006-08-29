@@ -1,0 +1,360 @@
+|| sadXMLHttpRequest.scurl
+|| maintained by: sadman
+||
+|| Simple class that mirrors the features of the XMlHttpReuest object -
+|| follows the W3 spec at http://www.w3.org/TR/XMLHttpRequest/#dfn-responsexml
+|| Distributed under the New BSD License:
+|#
+  Copyright (c) 2006, Steve Adams
+  All rights reserved.
+
+  Redistribution and use in source and binary forms, with or without modification, are permitted 
+  provided that the following conditions are met:
+
+    * Redistributions of source code must retain the above copyright notice, this list of conditions 
+      and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright notice, this list of conditions 
+      and the following disclaimer in the documentation and/or other materials provided with the distribution.
+    * Neither the name of the <ORGANIZATION> nor the names of its contributors may be used to endorse or promote products 
+      derived from this software without specific prior written permission.
+
+  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED 
+  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A 
+  PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY 
+  DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, 
+  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) 
+  HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT 
+  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, 
+  EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#|
+{curl-file-attributes character-encoding = "utf8"}
+
+{define-enum public readyStateEnum
+    Uninitialized,
+    Open,
+    Sent,
+    Receiving,
+    Loaded    
+}
+
+|| 
+{define-class public sadXMLHttpRequest
+  
+  field protected http-file:#HttpFile
+  field protected http-tis:#HttpTextInputStream
+  field protected location:#Url
+  field protected async?:bool = false
+  field protected async-opener:#AsyncFileOpener
+  field protected async-reader:#AsyncStreamReader
+  field protected http-request-hdrs:#HttpRequestHeaders
+  field protected http-request-method:HttpRequestMethod = HttpRequestMethod.get
+  
+  field protected response-buf:#StringBuf
+  
+  field protected _readyState:readyStateEnum = readyStateEnum.Uninitialized
+  {getter public {readyState}:readyStateEnum
+    {return self._readyState}
+  }
+  
+  {setter public {readyState state:readyStateEnum}:void
+    set self._readyState = state
+    
+    || call the state change proc
+    {self.onreadystatechange}
+  }
+  
+  
+  field public onreadystatechange:{proc-type {}:void} =
+      {proc {}:void}
+  
+
+  {getter public {responseText}:String
+    || apply rules for state
+    {if self.readyState != readyStateEnum.Receiving and 
+        self.readyState != readyStateEnum.Loaded then
+        {return ""}
+    }
+    {if-non-null buf = self.response-buf then
+        {return {buf.to-String}}
+     else
+        {return ""}
+    }
+  }
+  
+  {getter public {responseXML}:#sadXMLDom
+    || apply rules for state
+    {if self.readyState != readyStateEnum.Loaded then
+        {return null}
+    }
+    {if-non-null buf = self.response-buf then
+        {return {sadXMLDom.from-StringBuf buf}}
+     else
+        {return null}
+    }
+  }
+  
+  field protected _status:int = -1
+  {getter public {status}:int
+    {if self._status < -0 then
+        {self.exception {message Bad status. {value self._status}}}
+    }
+    {return self._status}
+  }
+  
+  {setter public {status st:int}:void
+    set self._status = st
+  }
+  
+  field protected _statusText:String = ""
+  {getter public {statusText}:String
+    {if self._statusText.empty? then
+        {self.exception {message {message Bad status text.}}}
+    }
+    {return self._statusText}
+  }
+  
+  || cancel and close the current file operations
+  {method public {abort}:void
+    {self.reset}
+    {if-non-null tis = self.http-tis then
+        {tis.close}
+    }
+  }
+  
+  || send the request;
+  {method public {send data:#HttpRequestData = null}:void
+    || need to open the stream with the specified request headers - if any
+    
+    || sends the request, reads the response
+    set self.response-buf = {StringBuf}
+    {if self.async? then
+        {self.send-async data}
+     else
+        {self.send-sync data}
+    }
+    
+||--    {if-non-null tis = self.http-tis then
+||--        
+||--        || at this point we have headers
+||--        set self.readyState = readyStateEnum.Receiving
+||--        
+||--        {if self.async? then
+||--            set self.readyState = readyStateEnum.Sent
+||--            {tis.async-read-string  buf = self.response-buf,
+||--                {on e:AsyncStreamReadEvent do
+||--                    || current status
+||--                    set self.status = self.http-tis.response-headers.status
+||--                    
+||--                    {if e.done? then
+||--                        || requester state
+||--                        set self.readyState = readyStateEnum.Loaded
+||--                        
+||--                        || todo: where should the stream be closed?
+||--                        {tis.close}
+||--                     else
+||--                        || not finished yet, so we are receiving
+||--                        set self.readyState = readyStateEnum.Receiving
+||--                    }
+||--                }
+||--            }
+||--        }
+||--    }
+  }
+  
+  || handle a synchronous call
+  {method protected {send-sync data:#HttpRequestData}:void
+    || open the stream
+    {try
+        set self.http-tis =
+            {self.http-file.http-read-open
+                always-return-response-headers? = true,
+                request-headers = self.http-request-hdrs,
+                request-data = data,
+                request-method = self.http-request-method
+            }
+        
+        || current status
+        set self.readyState = readyStateEnum.Receiving
+        
+        || should check the status here - what about redirects?
+        
+        || now read from the stream
+        {if-non-null tis = self.http-tis then
+            || requester state
+            set self.readyState = readyStateEnum.Sent
+            
+            || read everything
+            {tis.read-one-string  buf = self.response-buf}
+            
+            || current status
+            set self.status = self.http-tis.response-headers.status
+            
+            || requester state
+            set self.readyState = readyStateEnum.Loaded
+            
+        }
+     catch e:Exception do
+        {self.exception {message Error occurred {value e.message}}}
+     finally
+
+    }
+  }
+  
+  {method protected {send-async data:#HttpRequestData}:void
+    || asynchronously open the stream
+    || keep the opener handle in case we need to cancel
+    set self.async-opener =
+        {self.http-file.http-async-read-open
+            request-headers = self.http-request-hdrs, 
+            request-data = data,
+            request-method = self.http-request-method,
+            {on e:AsyncFileOpenEvent do
+                || now read the responses
+                {if-non-null tis = self.http-tis then
+                    set self.async-reader =
+                        {tis.async-read-string  buf = self.response-buf,
+                            {on e:AsyncStreamReadEvent do
+                                || current status
+                                set self.status = self.http-tis.response-headers.status
+                                
+                                {if e.done? then
+                                    || requester state
+                                    set self.readyState = readyStateEnum.Loaded
+                                 else
+                                    || not finished yet, so we are receiving
+                                    set self.readyState = readyStateEnum.Receiving
+                                }
+                            }       
+                        }
+                    {if-non-null self.async-reader then
+                        set self.readyState = readyStateEnum.Receiving
+                    }
+                }                
+            },
+            {on e:AsyncFileOpenEvent do
+                set self.http-tis = e.stream asa HttpTextInputStream
+                || current status
+                set self.status = self.http-tis.response-headers.status
+                
+                set self.readyState = readyStateEnum.Sent
+            }
+        }
+  }
+  
+  || returns the response headers as a String
+  {method public {getAllResponseHeaders}:#String
+    || apply rules for state
+    {if self.readyState != readyStateEnum.Receiving and 
+        self.readyState != readyStateEnum.Loaded then
+        {return null}
+    }
+    
+    || find the headers
+    {if-non-null tis = self.http-tis then
+        let headers:HttpResponseHeaders =
+            tis.response-headers
+        
+        let sb:StringBuf = {StringBuf}
+        {for hdr-value:String key hdr-name:String in headers do
+            {sb.concat 
+                {format "%s: %s", hdr-name, hdr-value}
+            }
+            || canonical eol sequence
+            {sb.append '\u000d'}
+            {sb.append '\u000a'}
+        }
+        {return {sb.to-String}}
+     else
+        {return ""}
+    }
+  }
+  
+  || Returns the requested response header
+  {method public {getResponseHeader name:String}:String
+    {if self.readyState != readyStateEnum.Receiving and 
+        self.readyState != readyStateEnum.Loaded then
+        {return ""}
+    }
+    
+    {if-non-null tis = self.http-tis then
+        let (hdr:String, found?:bool) =
+            {tis.response-headers.get-if-exists name}
+        
+        {if found? then
+            {return hdr}
+        }
+    }
+    {return ""}
+  }
+  
+  || add data to the request to be made
+  {method public {setRequestHeader header:String, val:String}:void
+    {if self.readyState != readyStateEnum.Open then
+        {self.exception {message Attempted to set request header {value header} to {value val}}}
+    }
+    
+    {if-non-null hdrs = self.http-request-hdrs then
+        || TODO - some headers should be replaced
+        {hdrs.append header, val}
+     else
+        set self.http-request-hdrs =
+            {HttpRequestHeaders header, val}
+    }
+  }
+  
+  || initialize the XMLHttpRequest
+  || supports only HEAD, POST, GET
+  {method public {open 
+                     method:HttpRequestMethod, 
+                     location:Url, 
+                     async?:bool = true,
+                     || these parameters not yet implemented
+                     user-name:#String = null,
+                     password:#String = null
+                 }:void
+    || reset if state is Loaded - but what about other states?
+    {if self.readyState == readyStateEnum.Loaded then
+        {self.reset}
+    }
+    || set to uninitialized
+    set self.readyState = readyStateEnum.Uninitialized
+    
+    set self.location = location
+    set self.async? = async?
+    || get the httpfile
+    {with-file-caching-style FileCachingStyle.reload do
+        set self.http-file = {location.resolve} asa HttpFile
+    }
+    || set state to open
+    set self.readyState = readyStateEnum.Open
+
+  }
+  
+  || reset the object to an initial state
+  {method public {reset}:void
+    
+    {if self.async? then
+        {if-non-null aopen = self.async-opener then
+            {aopen.cancel}
+        }
+        {if-non-null aread = self.async-reader then
+            {aread.cancel}
+        }
+        set self.async-opener = null
+        set self.async-reader = null
+    }
+    {if-non-null tis = self.http-tis then
+        {if tis.open? then
+            {tis.close}
+        }
+    }
+    set self.readyState = readyStateEnum.Uninitialized
+    
+  }
+  
+  {method public {exception msg:String}:void
+    {throw
+        {Exception msg}
+    }
+  }
+} || sadXMLHttpRequest

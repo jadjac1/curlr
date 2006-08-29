@@ -1,0 +1,181 @@
+|| bitops.scurl
+|| maintained by: sadman
+||
+|| Utility procs for bitwise operations.
+||
+|| Distributed under the New BSD License:
+|#
+  Copyright (c) 2006, Steve Adams
+  All rights reserved.
+
+  Redistribution and use in source and binary forms, with or without modification, are permitted 
+  provided that the following conditions are met:
+
+    * Redistributions of source code must retain the above copyright notice, this list of conditions 
+      and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright notice, this list of conditions 
+      and the following disclaimer in the documentation and/or other materials provided with the distribution.
+    * Neither the name of the <ORGANIZATION> nor the names of its contributors may be used to endorse or promote products 
+      derived from this software without specific prior written permission.
+
+  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED 
+  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A 
+  PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY 
+  DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, 
+  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) 
+  HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT 
+  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, 
+  EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#|
+{curl-file-attributes character-encoding = "utf8"}
+
+
+|| common byte manipulation functions - will eventually be available in a separate public 
+{doc-next {purpose Return a ByteVec with the contents of an int32.}}
+{define-proc public inline {int32-to-ByteVec i:int32}:ByteVec
+    let bv:ByteVec = {ByteVec.from-size 4, 0}
+    set bv[0] = {bit-and i, 0x00ff} asa byte
+    set bv[1] = {bit-and {bit-srl i, 8}, 0x00ff}  asa byte
+    set bv[2] = {bit-and {bit-srl i, 16}, 0x00ff} asa byte
+    set bv[3] = {bit-and {bit-srl i, 24}, 0x00ff} asa byte 
+    {return bv}
+}
+{doc-next {purpose Return a int32 from the contents of a ByteVec.}}
+{define-proc public inline {ByteVec-to-int32 bv:ByteVec}:int32
+    {return
+        {bit-or
+            {bit-and bv[0], 0xffffffff},
+            {bit-and {bit-sll bv[1], 8}, 0xffffffff},
+            {bit-and {bit-sll bv[2], 16}, 0xffffffff},
+            {bit-and {bit-sll bv[3], 24}, 0xffffffff}          
+        }
+    }
+}
+{doc-next {purpose Return a int64 from the contents of a ByteVec.}}
+{define-proc public inline {ByteVec-to-int64 bv:ByteVec}:int64
+    {return
+        {bit-or
+            {bit-and bv[0], 0xffffffffffffffff},
+            {bit-and {bit-sll bv[1] asa int64, 8} asa int64, 0xffffffffffffffff},
+            {bit-and {bit-sll bv[2] asa int64, 16} asa int64, 0xffffffffffffffff},
+            {bit-and {bit-sll bv[3] asa int64, 24} asa int64, 0xffffffffffffffff},
+            {bit-and {bit-sll bv[4] asa int64, 32} asa int64, 0xffffffffffffffff},
+            {bit-and {bit-sll bv[5] asa int64, 40} asa int64, 0xffffffffffffffff},
+            {bit-and {bit-sll bv[6] asa int64, 48} asa int64, 0xffffffffffffffff},
+            {bit-and {bit-sll bv[7] asa int64, 56} asa int64, 0xffffffffffffffff}  
+        }
+    }
+}
+
+{doc-next {purpose Reverse the byte order in an int32 and return an int32.}}
+{define-proc public inline {int32-reverse i:int32}:int32
+    let bv:ByteVec = {int32-to-ByteVec i}
+    
+    {return
+        {bit-or
+            {bit-and bv[3], 0xffffffff},
+            {bit-and {bit-sll bv[2], 8}, 0xffffffff},
+            {bit-and {bit-sll bv[1], 16}, 0xffffffff},
+            {bit-and {bit-sll bv[0], 24}, 0xffffffff}        
+        }
+    }
+}
+{doc-next {purpose Reverse the byte order in an int32 and return a ByteVec.}}
+{define-proc public inline {int32-reverse-ByteVec i:int32}:ByteVec
+    let bv:ByteVec = {int32-to-ByteVec i}
+    {return
+        {ByteVec
+            bv[3], bv[2], bv[1], bv[0]
+        }
+    }
+}
+
+{doc-next {purpose Rotate bits to the left.}}
+{define-proc public {bit-rol value:int32, count:int}:int32
+    {return
+        {bit-or
+            {bit-sll value, count},
+            {bit-srl value, 32 - count}
+        }
+    }
+}
+
+{doc-next {purpose Rotate bits to the right.}}
+{define-proc public {bit-ror value:int32, count:int}:int32
+    {return
+        {bit-or
+            {bit-sll value, 32 - count},
+            {bit-srl value, count}
+        }
+    }
+}
+
+{doc-next {purpose Rotate bits to the left.}}
+{define-proc public {bit64-rol value:int64, count:int}:int64
+    {return
+        {bit-or
+            {bit-sll value, count},
+            {bit-srl value, 64 - count}
+        }
+    }
+}
+
+{doc-next {purpose Rotate bits to the right.}}
+{define-proc public {bit64-ror value:int64, count:int}:int64
+    {return
+        {bit-or
+            {bit-sll value, 64 - count},
+            {bit-srl value, count}
+        }
+    }
+}
+{doc-next {purpose Transform a hex character to a byte vec.}}
+{define-proc public {hex-to-byte c:char}:int
+    {if '0' <= c and c <= '9' then
+        {return c - '0'}
+     elseif 'a' <= c and c <= 'f' then
+        {return c - 'a' + 0xa}
+     elseif 'A' <= c and c <= 'F' then
+        {return c - 'A' + 0xa}
+    }
+    {return -1}
+}
+{doc-next {purpose Transform a hex string to a byte vec.}}
+{define-proc public {ByteVec-from-hex-string hex-string:StringInterface}:ByteVec
+    let ba:ByteArray = {ByteArray}
+    {for i = 0  below hex-string.size - 1 step 2 do
+        let hi:int = {hex-to-byte hex-string[i]}
+        let lo:int = {hex-to-byte hex-string[i + 1]}
+        {ba.append
+            {bit-or
+                {bit-sll hi, 4},
+                lo
+            } asa byte
+        }
+    }
+    {return ba.underlying-FastArray}
+}
+
+{let public constant hexchars:CharVec =
+    {CharVec
+        '0' , '1' , '2' , '3' ,
+        '4' , '5' , '6' , '7' ,
+        '8' , '9' , 'A' , 'B' ,
+        'C' , 'D' , 'E' , 'F' 
+    }
+}
+
+{doc-next {purpose Transform a ByteVec into a hex string.}}
+{define-proc public {ByteVec-to-hex-string bv:ByteVec}:String
+    let sb:StringBuf = {StringBuf}
+    
+    {for b in bv do
+        let hi:char = hexchars[{bit-srl {bit-and b, 0xf0}, 4}]
+        let lo:char = hexchars[{bit-and b, 0x0f}]
+        {sb.append hi}
+        {sb.append lo}
+    }
+    {return {sb.to-String}}
+}
+
+
