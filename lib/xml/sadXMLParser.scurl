@@ -72,11 +72,15 @@
 || A very lightweight XML parser
 {define-class public sadXMLParser
   
-  || monolithic, but fast parser
-  {method public {parse tis:TextInputStream}:sadXMLNode
+  || monolithic, but lightweight parser
+  {method public {parse 
+                     tis:TextInputStream,
+                     || optional document
+                     document:#sadXMLDom = null
+                 }:sadXMLNode
     || the root node
     let depth:int = 0
-    let root-node:sadXMLNode = {sadXMLNode "root", depth = depth}
+    let root-node:sadXMLNode = {sadXMLNode "root", depth = depth, document = document}
     
     || stack of the parse state and initial state
     let state-stack:stateStack = {stateStack}

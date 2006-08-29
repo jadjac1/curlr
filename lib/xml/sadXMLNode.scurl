@@ -40,6 +40,8 @@
 }
 || Simple XML node
 {define-class public sadXMLNode 
+  || root document
+  field public document:#sadXMLDom
   || parent node
   field public parent:#sadXMLNode
   || child nodes
@@ -58,6 +60,10 @@
                           name:String, 
                           || optional depth in hierarchy
                           depth:int = 0,
+                          || parent
+                          parent:#sadXMLNode = null,
+                          || document
+                          document:#sadXMLDom = null,
                           || text value for the node
                           text:String = "", 
                           || attributes, if any
@@ -65,11 +71,13 @@
                           || children, if any
                           children:#{Array-of sadXMLNode} = null
                       }
-    set self.children   = children
+    set self.parent = parent
+    set self.document = document
     set self.local-name = name
     set self.depth = depth
-    set self.attrs = attrs
     set self.text  = text
+    set self.attrs = attrs
+    set self.children   = children
   }
   
   || tree node functions
@@ -77,6 +85,7 @@
   || add a node (and its sub-tree) as a child
   {method public {append node:sadXMLNode}:void
     set node.parent = self
+    set node.document = self.document
     set node.depth = self.depth + 1
     {if self.children == null then
         set self.children = {new {Array-of sadXMLNode}}
@@ -211,6 +220,83 @@
     }
     
     {return {sb.to-String}}
+  }
+  
+  || W3C DOM level 1 getters
+  {getter public {nodeName}:String
+    {return self.local-name}
+  }
+  {getter public {parentNode}:#sadXMLNode
+    {return self.parent}
+  }
+  {getter public {childNodes}:#{Array-of sadXMLNode}
+    {return self.children}
+  }
+  {getter public {firstNode}:#sadXMLNode
+    {if-non-null children = self.children then
+        {if children.size > 0 then
+            {return children[0]}
+        }
+    }
+    {return null}
+  }
+  {getter public {lastNode}:#sadXMLNode
+    {if-non-null children = self.children then
+        {if children.size > 0 then
+            {return children[children.size - 1]}
+        }
+    }
+    {return null}
+  }
+  {getter public {previousSibling}:#sadXMLNode
+    {if-non-null parent = self.parent then
+        {if-non-null p-children = parent.children then
+            || find self in the parent children
+            let index:int = {p-children.find self}
+            {if index > 0 then
+                {return p-children[index - 1]}
+             else
+                {return null}
+            }
+         else
+            || the tree is malformed if the parent has no children
+            || should we throw exception?
+        }
+    }
+    {return null}
+  }
+  {getter public {nextSibling}:#sadXMLNode
+     {if-non-null parent = self.parent then
+        {if-non-null p-children = parent.children then
+            || find self in the parent children
+            let index:int = {p-children.find self}
+            {if index >= 0 and index < p-children.size - 2 then
+                {return p-children[index + 1]}
+             else
+                {return null}
+            }
+         else
+            || the tree is malformed if the parent has no children
+            || should we throw exception?
+        }
+    }
+    {return null}
+  }
+  {getter public {attributes}:StringStringTable
+    let attributes:StringStringTable = {StringStringTable}
+    {if-non-null attrs = self.attrs then
+        {for (val:any, keyword:#String) in attrs do
+            {if-non-null keyword then
+                {if-non-null val then
+                    set attributes[keyword] = val asa String
+                }
+            }
+        }
+    }
+    {return attributes}
+  }
+  {getter public {ownerDocument}:#sadXMLDom
+    {return self.document}
   }
   
 } || class sadXMLNode
