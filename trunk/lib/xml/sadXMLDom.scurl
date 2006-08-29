@@ -29,20 +29,22 @@
 #|
 {curl-file-attributes character-encoding = "utf8"}
 
-
+{doc-next {purpose Simple implementation of an XML Document Object Model}}
 {define-class public sadXMLDom
   
   || root of a parsed XML tree
   field public-get protected-set root:#sadXMLNode
   
-  || idenification of the id element - i.e. the attribute name to be
+  || identification of the id element - i.e. the attribute name to be
   || used in searches for id
   field public id-str:String = "id"
-  
+  || identification of the name element - i.e. the attribute name to be
+  || used in searches for name
   field public name-str:String = "name"
-  
+  || the XML parser
   field public-get protected-set parser:sadXMLParser = {sadXMLParser}
-  
+
+  || creates the XML DOM from the specified location 
   {factory public {from-location
                       location:Url,
                       || parameters for a read-open
@@ -54,11 +56,12 @@
     || open the location for read
     {with-open-streams
         tis = {read-open location, {splice ...}} do
-        set dom.root = {dom.parser.parse tis}
+        set dom.root = {dom.parser.parse tis, document = dom}
     }
     {return dom}
   }
   
+  || creates the XML DOM from a StringBuf 
   {factory public {from-StringBuf
                       buffer:StringBuf
                   }:sadXMLDom
@@ -67,7 +70,8 @@
     
     set dom.root = 
         {dom.parser.parse 
-            {{TextInputStream-from StringBuf} buffer}
+            {{TextInputStream-from StringBuf} buffer},
+            document = dom
         }
 
     {return dom}
@@ -121,4 +125,4 @@
     {return elements}
   }
   
-} || sadXMlDom
+} || class sadXMlDom
