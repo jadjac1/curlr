@@ -15,7 +15,7 @@
       and the following disclaimer.
     * Redistributions in binary form must reproduce the above copyright notice, this list of conditions 
       and the following disclaimer in the documentation and/or other materials provided with the distribution.
-    * Neither the name of the <ORGANIZATION> nor the names of its contributors may be used to endorse or promote products 
+    * Neither the name of curlr nor the names of its contributors may be used to endorse or promote products 
       derived from this software without specific prior written permission.
 
   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED 
@@ -37,25 +37,140 @@
     Loaded    
 }
 
-|| 
+|| headers to be ignored
+{let package constant ignore-headers:StringArray =
+    {StringArray 
+        "Accept-Charset",
+        "Accept-Encoding",
+        "Content-Length",
+        "Expect",
+        "Date",
+        "Host",
+        "Keep-Alive",
+        "Referer",
+        "TE",
+        "Trailer",
+        "Transfer-Encoding",
+        "Upgrade"
+    }
+}
+
+|| package headers to be replaced
+{let constant replace-headers:StringArray =
+    {StringArray "Authorization",
+        "Content-Base",
+        "Content-Location",
+        "Content-MD5",
+        "Content-Range",
+        "Content-Type",
+        "Content-Version",
+        "Delta-Base",
+        "Depth",
+        "Destinaion",
+        "ETag",
+        "Expect",
+        "From",
+        "If-Modified-Since",
+        "If-Range",
+        "If-Unmodified-Since",
+        "Max-Forwards",
+        "MIME-Version",
+        "Overwrite",
+        "Proxy-Authorization",
+        "SOAPAction",
+        "Timeout"
+    }
+}
+|| comparison proc for the header name
+{define-proc package {header-equal? x:String, y:String}:bool
+    {return {x.equal? y, ignore-case? = true}}
+}
+
+|| reason codes
+{let package reason-codes:{HashTable-of int, String} =
+    {new {HashTable-of int, String},
+        100, "Continue",
+        101, "Switching Protocols",
+        200, "OK",
+        201, "Created",
+        202, "Accepted",
+        203, "Non-Authoritative Information",
+        204, "No Content",
+        205, "Reset Content",
+        206, "Partial Content",
+        300, "Multiple Choices",
+        301, "Moved Permanently",
+        302, "Moved Temporarily",
+        303, "See Other",
+        304, "Not Modified",
+        305, "Use Proxy",
+        400, "Bad Request",
+        401, "Unauthorized",
+        402, "Payment Required",
+        403, "Forbidden",
+        404, "Not Found",
+        405, "Method Not Allowed",
+        406, "Not Acceptable",
+        407, "Proxy Authentication Required",
+        408, "Request Time-out",
+        409, "Conflict",
+        410, "Gone",
+        411, "Length Required",
+        412, "Precondition Failed",
+        413, "Request Entity Too Large",
+        414, "Request-URI Too Large",
+        415, "Unsupported Media Type",
+        500, "Internal Server Error",
+        501, "Not Implemented",
+        502, "Bad Gateway",
+        503, "Service Unavailable",
+        504, "Gateway Time-out",
+        505, "HTTP Version not supported"
+    }
+}
+
+
+
+{doc-next {purpose Curl implementation of an XMLHttpRequest object.}
+    
+    {details 
+        Follows - but not strictly - the W3 spec at {ctext http://www.w3.org/TR/XMLHttpRequest/#dfn-responsexml}
+        
+        Differences are:
+        {itemize
+            {item {docref readyState} is defined from the enumeration {docref readyStateEnum}.}
+            {item {docref onreadystatechange} is called when the readyState setter is called - not when a DOM event is raised.}
+            {item the check for xml content is made by searching the mime-type for the string "xml"}
+            {item uses a look-up table ti find the {docref statusText}}
+            {item raises excpetion sadBadStateException for unexpected {docref readyState}.}
+            {item does not support PUT and DELETE, does not support userinfo.}
+        }
+    }
+}
 {define-class public sadXMLHttpRequest
   
+  field protected request-url:#Url
   field protected http-file:#HttpFile
   field protected http-tis:#HttpTextInputStream
   field protected location:#Url
-  field protected async?:bool = false
+  field protected async?:bool = true
   field protected async-opener:#AsyncFileOpener
   field protected async-reader:#AsyncStreamReader
   field protected http-request-hdrs:#HttpRequestHeaders
   field protected http-request-method:HttpRequestMethod = HttpRequestMethod.get
-  
+  || buffer for the returned response
   field protected response-buf:#StringBuf
   
   field protected _readyState:readyStateEnum = readyStateEnum.Uninitialized
+  {doc-next {purpose Return the state of the XMLHttpRequest object.}}
   {getter public {readyState}:readyStateEnum
     {return self._readyState}
   }
   
+  {doc-next 
+    {purpose Set the state of the XMLHttpRequest object.}
+    {details Causes the assigned procedure {docref onreadystatechange} to be called.}
+  }
   {setter public {readyState state:readyStateEnum}:void
     set self._readyState = state
     
@@ -63,11 +178,17 @@
     {self.onreadystatechange}
   }
   
-  
+  {doc-next {purpose The procedure to be called when the state changes.}
+    {details The default procedure does nothing.}
+  }
   field public onreadystatechange:{proc-type {}:void} =
       {proc {}:void}
   
-
+  {doc-next {purpose Returns the response to the request as a String.}
+    {details Returns the empty string if the readyState is neither Receiving nor Loaded . 
+        Otherwise returns the contents of the response buffer.
+    }
+  }
   {getter public {responseText}:String
     || apply rules for state
     {if self.readyState != readyStateEnum.Receiving and 
@@ -81,11 +202,26 @@
     }
   }
   
+  {doc-next 
+    {purpose Returns the response to the request as a {docref sadXMLDom}.}
+    {details Returns null if the readyState is not Loaded, or if the content is not XML. 
+        Throws an exception if the parsing fails.
+    }
+  }
   {getter public {responseXML}:#sadXMLDom
     || apply rules for state
     {if self.readyState != readyStateEnum.Loaded then
         {return null}
     }
+    
+    || check content type - must be xml
+    {if-non-null m-type = self.http-tis.response-headers.mime-type then
+        {if {m-type.find-string "xml"} < 0 then
+            {return null}
+        }
+    }
+    
+    || parse the response buffer and return a sadXMLDom
     {if-non-null buf = self.response-buf then
         {return {sadXMLDom.from-StringBuf buf}}
      else
@@ -93,37 +229,128 @@
     }
   }
   
-  field protected _status:int = -1
+  {doc-next 
+    {purpose The response status from the Http headers.}
+    {details An exception is thrown if the readyState is not Loading or Receiving}
+  }
   {getter public {status}:int
-    {if self._status < -0 then
-        {self.exception {message Bad status. {value self._status}}}
+    || apply rules for state
+    {if self.readyState != readyStateEnum.Receiving and 
+        self.readyState != readyStateEnum.Loaded then
+        {self.bad-state-exception self.readyState.value, 
+            {message  Error  getting status: }
+        }
     }
-    {return self._status}
+    || return the status from the headers
+    {return
+        self.http-tis.response-headers.status
+    }
   }
   
-  {setter public {status st:int}:void
-    set self._status = st
+  {doc-next 
+    {purpose Returns the text associated with the {docref status}.}
+    {details 
+        The W3C spec requires this is to return the text associated with the response status. However, 
+        RFC 2068, section 6.1.1 says "the client is not required to examine or display the Reason-Phrase", and
+        Curl does not provide access to the text. So this returns the reason code specified in RFC 2068 or
+        the empty string if the code is not found.
+        
+        An exception is thrown if the readyState is not Loading or Receiving
+    }
   }
-  
-  field protected _statusText:String = ""
   {getter public {statusText}:String
-    {if self._statusText.empty? then
-        {self.exception {message {message Bad status text.}}}
+    let (text:String, found?:bool) =
+        {reason-codes.get-if-exists self.status}
+    {if found? then
+        {return text}
+     else
+        {return ""}
     }
-    {return self._statusText}
   }
   
-  || cancel and close the current file operations
+  {doc-next 
+    {purpose Cancels the current file operations and resets the sadXMLHttpRequest object.}
+    {details The object state is returned to Uninitialized, and all request fields are cleared}
+  }
   {method public {abort}:void
-    {self.reset}
-    {if-non-null tis = self.http-tis then
-        {tis.close}
+    || cancel network activity
+    {if self.async? then
+        {if-non-null aopen = self.async-opener then
+            {aopen.cancel}
+        }
+        {if-non-null aread = self.async-reader then
+            {aread.cancel}
+        }
     }
+    {if-non-null tis = self.http-tis then
+        {if tis.open? then
+            {tis.close}
+        }
+    }
+    
+    || reset the object
+    {self.reset}
   }
   
-  || send the request;
+  {doc-next {purpose Internal reset of the object to an initial state.}}
+  {method protected {reset}:void
+
+    || null fields
+    set self.http-request-hdrs = null
+    set self.response-buf = null
+    
+    set self.http-file    = null
+    set self.http-tis     = null
+    set self.location     = null
+    set self.async-opener = null
+    set self.async-reader = null
+    set self.http-request-hdrs = null
+    
+    || state is now uninitialized
+    set self.readyState = readyStateEnum.Uninitialized
+  }
+  
+  {doc-next {purpose Initialize the XMLHttpRequest.}
+    {details Aborts current operations and resets the object using {docref abort}. Sets the readyState to Open.
+        Does NOT support PUT or DELETE.
+        Does NOT support userinfo parameters
+    }
+  }
+  {method public {open 
+                     method:HttpRequestMethod, 
+                     location:Url, 
+                     async?:bool = true
+                     || these userinfo parameters are not supported
+||--                     user-name:#String = null,
+||--                     password:#String = null
+                 }:void
+    || always abort on open
+    || reset if state is Loaded - but what about other states - abort?
+    {self.abort}
+    
+    || set request parameters
+    set self.http-request-method = method
+    set self.location = location
+    set self.async? = async?
+    
+    || get the httpfile to be used
+    set self.http-file = {location.resolve} asa HttpFile
+
+    || set state to open
+    set self.readyState = readyStateEnum.Open
+
+  }
+  
+  
+  {doc-next {purpose Handles the request.}}
   {method public {send data:#HttpRequestData = null}:void
-    || need to open the stream with the specified request headers - if any
+    || to send, the state MUST be Open
+    {if self.readyState != readyStateEnum.Open then
+        {self.bad-state-exception
+            self.readyState.value,
+            {message send: expected state = {value readyStateEnum.Open}}
+        }
+    }
     
     || sends the request, reads the response
     set self.response-buf = {StringBuf}
@@ -132,36 +359,9 @@
      else
         {self.send-sync data}
     }
-    
-||--    {if-non-null tis = self.http-tis then
-||--        
-||--        || at this point we have headers
-||--        set self.readyState = readyStateEnum.Receiving
-||--        
-||--        {if self.async? then
-||--            set self.readyState = readyStateEnum.Sent
-||--            {tis.async-read-string  buf = self.response-buf,
-||--                {on e:AsyncStreamReadEvent do
-||--                    || current status
-||--                    set self.status = self.http-tis.response-headers.status
-||--                    
-||--                    {if e.done? then
-||--                        || requester state
-||--                        set self.readyState = readyStateEnum.Loaded
-||--                        
-||--                        || todo: where should the stream be closed?
-||--                        {tis.close}
-||--                     else
-||--                        || not finished yet, so we are receiving
-||--                        set self.readyState = readyStateEnum.Receiving
-||--                    }
-||--                }
-||--            }
-||--        }
-||--    }
   }
   
-  || handle a synchronous call
+  || internal method to handle a synchronous request
   {method protected {send-sync data:#HttpRequestData}:void
     || open the stream
     {try
@@ -174,20 +374,17 @@
             }
         
         || current status
-        set self.readyState = readyStateEnum.Receiving
+        set self.readyState = readyStateEnum.Sent
         
         || should check the status here - what about redirects?
         
         || now read from the stream
         {if-non-null tis = self.http-tis then
             || requester state
-            set self.readyState = readyStateEnum.Sent
+            set self.readyState = readyStateEnum.Receiving
             
             || read everything
             {tis.read-one-string  buf = self.response-buf}
-            
-            || current status
-            set self.status = self.http-tis.response-headers.status
             
             || requester state
             set self.readyState = readyStateEnum.Loaded
@@ -196,15 +393,17 @@
      catch e:Exception do
         {self.exception {message Error occurred {value e.message}}}
      finally
-
+        || catch-all processing
     }
   }
   
+  || internal method to handle an asynchronous request
   {method protected {send-async data:#HttpRequestData}:void
     || asynchronously open the stream
     || keep the opener handle in case we need to cancel
     set self.async-opener =
         {self.http-file.http-async-read-open
+            always-return-response-headers? = true,
             request-headers = self.http-request-hdrs, 
             request-data = data,
             request-method = self.http-request-method,
@@ -214,8 +413,6 @@
                     set self.async-reader =
                         {tis.async-read-string  buf = self.response-buf,
                             {on e:AsyncStreamReadEvent do
-                                || current status
-                                set self.status = self.http-tis.response-headers.status
                                 
                                 {if e.done? then
                                     || requester state
@@ -233,15 +430,17 @@
             },
             {on e:AsyncFileOpenEvent do
                 set self.http-tis = e.stream asa HttpTextInputStream
-                || current status
-                set self.status = self.http-tis.response-headers.status
                 
                 set self.readyState = readyStateEnum.Sent
             }
         }
   }
   
-  || returns the response headers as a String
+  {doc-next {purpose Returns the response headers as a String.}
+    {details Headers are separated with the eol sequence {ctext \u000d \u000a} .
+        Returns null if the readyState is not Receiving or Loaded
+    }
+  }
   {method public {getAllResponseHeaders}:#String
     || apply rules for state
     {if self.readyState != readyStateEnum.Receiving and 
@@ -269,7 +468,9 @@
     }
   }
   
-  || Returns the requested response header
+  {doc-next {purpose Returns the requested response header.}
+    {details Returns the empty string is readyState is not Receiving or Loaded.}
+  }
   {method public {getResponseHeader name:String}:String
     {if self.readyState != readyStateEnum.Receiving and 
         self.readyState != readyStateEnum.Loaded then
@@ -287,74 +488,86 @@
     {return ""}
   }
   
-  || add data to the request to be made
+  {doc-next {purpose Add a request header.}
+    {details 
+        Appends the value to the header except for the following cases:
+        
+        Does not add the header if it is one of: 
+        "Accept-Charset", "Accept-Encoding", "Content-Length", "Expect", "Date", "Host", "Keep-Alive",
+        "Referer", "TE", "Trailer","Transfer-Encoding", "Upgrade"
+        
+        Replaces the header if it is one of:
+        "Authorization", "Content-Base", "Content-Location", "Content-MD5", "Content-Range",
+        "Content-Type", "Content-Version", "Delta-Base", "Depth", "Destinaion",
+        "ETag", "Expect", "From", "If-Modified-Since", "If-Range",
+        "If-Unmodified-Since", "Max-Forwards", "MIME-Version", "Overwrite", "Proxy-Authorization",
+        "SOAPAction", "Timeout"
+    }
+  }
   {method public {setRequestHeader header:String, val:String}:void
     {if self.readyState != readyStateEnum.Open then
         {self.exception {message Attempted to set request header {value header} to {value val}}}
     }
+    || reject illegal characters
+    {if {header.find-char-class "\r\n: "} >= 0 then
+        {self.exception {message Illegal characters in header name {value header}}}
+    }
+    {if {val.find-char-class "\r\n"} >= 0 then
+        {self.exception {message Illegal characters in header value {value val}}}
+    }
     
-    {if-non-null hdrs = self.http-request-hdrs then
-        || TODO - some headers should be replaced
-        {hdrs.append header, val}
+    || handle headers 
+    {if {ignore-headers.find header, equality-proc = header-equal?} >= 0 then
+        || ignore: UA specifies these
      else
-        set self.http-request-hdrs =
-            {HttpRequestHeaders header, val}
+        || create a request headers object if necessary
+        {if self.http-request-hdrs == null then
+            set self.http-request-hdrs = {HttpRequestHeaders}
+        }
+        
+        {if-non-null headers = self.http-request-hdrs then
+            || either replace or append headers according to the spec.
+            {if {replace-headers.find header, equality-proc = header-equal?} >= 0 then
+                || single valued headers are replaced
+                set headers[header] = val
+             else
+                || multiple valued headers are appended
+                {headers.append header, val}
+            }
+        }
     }
   }
   
-  || initialize the XMLHttpRequest
-  || supports only HEAD, POST, GET
-  {method public {open 
-                     method:HttpRequestMethod, 
-                     location:Url, 
-                     async?:bool = true,
-                     || these parameters not yet implemented
-                     user-name:#String = null,
-                     password:#String = null
-                 }:void
-    || reset if state is Loaded - but what about other states?
-    {if self.readyState == readyStateEnum.Loaded then
-        {self.reset}
-    }
-    || set to uninitialized
-    set self.readyState = readyStateEnum.Uninitialized
-    
-    set self.location = location
-    set self.async? = async?
-    || get the httpfile
-    {with-file-caching-style FileCachingStyle.reload do
-        set self.http-file = {location.resolve} asa HttpFile
-    }
-    || set state to open
-    set self.readyState = readyStateEnum.Open
-
-  }
-  
-  || reset the object to an initial state
-  {method public {reset}:void
-    
-    {if self.async? then
-        {if-non-null aopen = self.async-opener then
-            {aopen.cancel}
-        }
-        {if-non-null aread = self.async-reader then
-            {aread.cancel}
-        }
-        set self.async-opener = null
-        set self.async-reader = null
-    }
-    {if-non-null tis = self.http-tis then
-        {if tis.open? then
-            {tis.close}
-        }
-    }
-    set self.readyState = readyStateEnum.Uninitialized
-    
-  }
-  
-  {method public {exception msg:String}:void
+  || Exception generation
+  {method protected {bad-state-exception state:int, msg:String}:void
     {throw
-        {Exception msg}
+        {sadBadStateException 
+            state, 
+            {message Unexpected readyState = {value state}}
+        }
+    }
+  }
+  {method protected {exception msg:String}:void
+    {throw
+        {sadXMLHttpRequestException msg}
     }
   }
 } || sadXMLHttpRequest
+
+
+|| exceptions
+
+|| general exception for bad processing
+{define-class public sadXMLHttpRequestException {inherits Exception}
+  {constructor public {default msg:String}
+    {construct-super msg}
+  }
+}
+{define-class public sadBadStateException {inherits sadXMLHttpRequestException}
+  field public state:int
+  {constructor public {default state:int, msg:String}
+    set self.state = state
+    {construct-super msg}
+  }
+}
+

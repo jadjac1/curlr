@@ -13,7 +13,7 @@
       and the following disclaimer.
     * Redistributions in binary form must reproduce the above copyright notice, this list of conditions 
       and the following disclaimer in the documentation and/or other materials provided with the distribution.
-    * Neither the name of the <ORGANIZATION> nor the names of its contributors may be used to endorse or promote products 
+    * Neither the name of curlr nor the names of its contributors may be used to endorse or promote products 
       derived from this software without specific prior written permission.
 
   THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED 
@@ -25,12 +25,26 @@
   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, 
   EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #|
-{curl 4.0 package}
+{curl 5.0 package}
 {curl-file-attributes character-encoding = "utf8"}
 {package COM.CURLR.XML,
     {compiler-directives careful? = true},
     version = "1.0",
     author = "Steve Adams"
+}
+
+{doc
+    type = package,
+    COM.CURLR.XML,
+    {purpose 
+        Provides the following XML processing classes:
+        {itemize
+            {item {docref sadXMLParser} - a lightweight non-validating XML parser}
+            {item {docref sadXMLNode} - a tree node structure representing parsed XML elements.}
+            {item {docref sadXMLDom} - a lightweight XML Document Object Model.}
+            {item {docref sadXMLHttpRequest} - an implementation of the XMLHttpRequest object.}
+        }
+    }
 }
 
 {import * from CURL.GUI.CONTROLS}
