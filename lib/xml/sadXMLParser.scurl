@@ -1,0 +1,464 @@
+|| sadXMLParser.scurl
+|| maintained by: sadman
+||
+|| Lightweight non-validating XML parser derived from the Java Quick and Dirty xml parser.  
+|| (http://www.javaworld.com/javatips/jw-javatip128_p.html)
+|| This parser simply converts a document into  a tree of nodes.
+||
+|| Distributed under the New BSD License:
+|#
+  Copyright (c) 2006, Steve Adams
+  All rights reserved.
+
+  Redistribution and use in source and binary forms, with or without modification, are permitted 
+  provided that the following conditions are met:
+
+    * Redistributions of source code must retain the above copyright notice, this list of conditions 
+      and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright notice, this list of conditions 
+      and the following disclaimer in the documentation and/or other materials provided with the distribution.
+    * Neither the name of the <ORGANIZATION> nor the names of its contributors may be used to endorse or promote products 
+      derived from this software without specific prior written permission.
+
+  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED 
+  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A 
+  PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY 
+  DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, 
+  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) 
+  HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT 
+  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, 
+  EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#|
+
+
+|| parsing state
+{define-enum ParseStateEnum
+    TEXT ,
+    ENTITY ,
+    OPEN_TAG,
+    CLOSE_TAG,
+    START_TAG,
+    ATTRIBUTE_NAME,
+    ATTRIBUTE_EQUAL,
+    ATTRIBUTE_VALUE,
+    QUOTE  ,
+    IN_TAG ,
+    SINGLE_TAG,
+    COMMENT,
+    DONE,
+    DOCTYPE,
+    DOCTYPE-CONTENT,
+    PRE,
+    CDATA
+}
+
+|| the parse state stack
+{define-class final stateStack {inherits {Array-of ParseStateEnum}}
+  {constructor  {default ...}
+    {construct-super {splice ...}}
+  }
+  
+  {method public inline final {pop}:ParseStateEnum
+    {if self.size > 0 then
+        {return {super.pop}}
+     else
+        {return ParseStateEnum.PRE}
+    }            
+  }
+}
+
+
+
+|| A very lightweight XML parser
+{define-class public sadXMLParser
+  
+  || monolithic, but lightweight parser
+  {method public {parse 
+                     tis:TextInputStream,
+                     || optional document
+                     document:#sadXMLDom = null
+                 }:sadXMLNode
+    || the root node
+    let depth:int = 0
+    let root-node:sadXMLNode = {sadXMLNode "root", depth = depth, document = document}
+    
+    || stack of the parse state and initial state
+    let state-stack:stateStack = {stateStack}
+    let state:ParseStateEnum = ParseStateEnum.PRE
+
+    let quotec:char = '\"'
+
+    let sb:StringBuf = {StringBuf efficient-size = 32}
+    let etag:StringBuf = {StringBuf efficient-size = 32}
+    
+    let tag-name:String  = ""
+    let attr-name:String  = ""
+    let attr-value:String  = ""
+    let attrs:#Arguments = null
+
+    || track line and column numbers for diagnostics
+    {let line:int=1, col:int=0}
+    let eol?:bool = false
+    
+    let current-node:sadXMLNode = root-node
+    
+    || parsing - one char at a time
+    {while true do
+        
+        || read a character - check for end of file / line
+        let (c:char, eof?:bool) = {tis.read-one}
+        {if eof? then {break}}
+        
+        || We need to map \r, \r\n, and \n to \n
+        || See XML spec section 2.11
+        {if c == '\n' and eol? then
+            set eol? = false
+            {continue}
+         elseif eol? then
+            set eol? = false
+         elseif c == '\n' then
+            {inc line}
+            set col=0
+         elseif c == '\r' then
+            set eol? = true
+            set c = '\n'
+            {inc line}
+            set col=0
+         else
+            {inc col}
+        }
+        
+        || somehow reached the finished state
+        {if state == ParseStateEnum.DONE then
+            {return root-node}
+            
+            || We are between tags collecting text.
+         elseif state == ParseStateEnum.TEXT then
+            {if (c == '<') then
+                {state-stack.push state}
+                set state = ParseStateEnum.START_TAG
+                {if (sb.size > 0) then
+                    set current-node.text = {sb.to-String}
+                    {sb.clear}
+                }
+             elseif (c == '&') then
+                {state-stack.push state}
+                set state = ParseStateEnum.ENTITY
+                {etag.clear}
+             else
+                {sb.append c}
+            }
+
+            || we are processing a closing tag: e.g. </foo>
+         elseif state == ParseStateEnum.CLOSE_TAG then
+            {if (c == '>') then
+                set state = {state-stack.pop}
+                set tag-name = {sb.to-String}
+                {sb.clear}
+                {inc depth, -1}
+                {if (depth==0) then
+                    set state = ParseStateEnum.DONE
+                 else
+                    || end element - so reset the current element
+                    {if-non-null node = current-node.parent then
+                        set current-node = node
+                    }
+                }
+             else
+                {sb.append c}
+            }
+
+
+            || we are processing CDATA
+         elseif state == ParseStateEnum.CDATA then
+            {if (c == '>' and 
+                 sb.size >= 2 and
+                 {sb.find-string |"]]"|, starting-index = sb.size - 2} >= 0) then
+                {sb.remove sb.size - 2, length = 2}
+                set current-node.text = {sb.to-String}
+                {sb.clear}
+                set state = {state-stack.pop}
+             else
+                {sb.append c}
+            }
+
+            || we are processing a comment.  We are inside
+            || the <!-- .... --> looking for the -->.
+         elseif state == ParseStateEnum.COMMENT then
+            {if (c == '>' and
+                 sb.size >= 2 and
+                 {sb.find-string |"--"|, starting-index = sb.size - 2} >= 0) then
+                {sb.clear}
+                set state = {state-stack.pop}
+             else
+                {sb.append c}
+            }
+
+            || We are outside the root tag element
+         elseif state == ParseStateEnum.PRE then
+            {if (c == '<') then
+                set state = ParseStateEnum.TEXT
+                {state-stack.push state}
+                set state = ParseStateEnum.START_TAG
+            }
+
+
+            || we have just seen a < and
+            || are wondering what we are looking at
+            || <foo>, </foo>, <!-- ... --->, etc.
+         elseif state == ParseStateEnum.START_TAG then
+            set state = {state-stack.pop}
+            {if (c == '/') then
+                {state-stack.push state}
+                set state = ParseStateEnum.CLOSE_TAG
+             elseif (c == '?') then
+                set state = ParseStateEnum.DOCTYPE
+             else
+                {state-stack.push state}
+                set state = ParseStateEnum.OPEN_TAG
+                set tag-name = ""
+                set attrs = null
+                {sb.append c}
+            }
+
+            
+            || we have just seen something like this:
+            || <foo a="b"/
+            || and are looking for the final >.
+         elseif state == ParseStateEnum.SINGLE_TAG then
+            {if tag-name.empty? then
+                set tag-name = {sb.to-String}
+            }
+            {if (c != '>') then
+                {gen-exception
+                    {message Expected > for tag: <{value tag-name}/>}, line, col
+                }
+            }
+            || new node in the tree
+            set current-node = {self.new-node current-node, tag-name, depth + 1}
+            {if-non-null attrs then
+                set current-node.attrs = attrs
+            }
+            set attrs = null
+            
+            || end element - how?
+            {if-non-null node = current-node.parent then
+                set current-node = node
+            }
+            {if (depth==0) then {return root-node}}
+            {sb.clear}
+
+            set tag-name = ""
+            set state = {state-stack.pop}
+            
+            || we are processing something
+            || like this <foo ... >.  It could
+            || still be a <!-- ... --> or something.
+         elseif state == ParseStateEnum.OPEN_TAG then
+            {if (c == '>') then
+                {if tag-name.empty? then
+                    set tag-name = {sb.to-String}
+                }
+                {sb.clear}
+                {inc depth}
+                
+                || new node in the tree
+                set current-node = {self.new-node current-node, tag-name, depth}
+
+                set tag-name = ""
+                set attrs = null
+                set state   = {state-stack.pop}
+                
+             elseif (c == '/') then
+                set state = ParseStateEnum.SINGLE_TAG
+                
+             elseif (c == '-' and sb.size >= 2 and {sb.substr 0, 2} == "!-") then
+                set state = ParseStateEnum.COMMENT
+                
+             elseif (c == '\[' and sb.size >= 7 and {sb.substr 0, 7} == "![CDATA") then
+                set state = ParseStateEnum.CDATA
+                {sb.clear}
+                
+             elseif (c == 'E' and sb.size >= 7 and {sb.substr 0, 7} == "!DOCTYP") then
+                {sb.clear}
+                set state = ParseStateEnum.DOCTYPE
+                
+
+             elseif (c ==' ' or c == '\r' or c=='\n' or c == '\u0009') then
+                set tag-name = {sb.to-String}
+                {sb.clear}
+                set state = ParseStateEnum.IN_TAG
+                
+             else
+                {sb.append c}
+            }
+
+            
+
+         elseif state == ParseStateEnum.ATTRIBUTE_VALUE then
+            {if (c == '\"' or c == '\'') then
+                set quotec = c
+                set state = ParseStateEnum.QUOTE
+             elseif (c ==' ' or c == '\r' or c=='\n' or c == '\u0009') then
+                || do nothing with whitespace
+             else
+                {gen-exception {message Error in attribute processing}, line, col}
+            }
+
+         elseif state == ParseStateEnum.ATTRIBUTE_NAME then
+            {if (c ==' ' or c == '\r' or c=='\n' or c == '\u0009') then
+                set attr-name = {sb.to-String}
+                {sb.clear}
+                set state = ParseStateEnum.ATTRIBUTE_EQUAL
+             elseif (c == '=') then
+                set attr-name = {sb.to-String}
+                {sb.clear}
+                set state = ParseStateEnum.ATTRIBUTE_VALUE
+             else
+                {sb.append c}
+            }
+
+         elseif state == ParseStateEnum.ATTRIBUTE_EQUAL then
+            {if (c == '=') then
+                set state = ParseStateEnum.ATTRIBUTE_VALUE
+             elseif (c ==' ' or c == '\r' or c=='\n' or c == '\u0009') then
+                || do nothing with whitespace
+             else
+                {gen-exception {message Error in attribute processing}, line, col}
+            }
+
+         elseif state == ParseStateEnum.IN_TAG then
+            {if (c == '>') then
+                set state = {state-stack.pop}
+                {inc depth}
+                || new node in the tree
+                set current-node = {self.new-node current-node, tag-name, depth}
+                set current-node.attrs = attrs
+                set tag-name = ""
+                set attrs = null
+             elseif (c == '/') then
+                set state = ParseStateEnum.SINGLE_TAG
+             elseif (c ==' ' or c == '\r' or c=='\n' or c == '\u0009') then
+                || do nothing with whitespace
+             else
+                set state = ParseStateEnum.ATTRIBUTE_NAME
+                {sb.append c}
+            }
+            
+            || we are processing an entity, e.g. &lt;, &#187;, etc.
+         elseif state == ParseStateEnum.ENTITY then
+            {if (c == ';') then
+                set state = {state-stack.pop}
+                let cent:String = {etag.to-String}
+                {etag.clear}
+                {if cent[0] == '#' then
+                    || extract the number
+                    {sb.concat {cent.substr 1, cent.size - 1}}
+                 else
+                    {sb.append
+                        {switch cent
+                         case "lt"   do '<'
+                         case "gt"   do '>'
+                         case "amp"  do '&'
+                         case "quot" do '\"'
+                         case "apos" do '\''
+                         else
+                            {gen-exception 
+                                {message Unknown entity: {value cent}}, line, col
+                            }
+                            ' '
+                        }
+                    }
+                }
+             else
+                {etag.append c}
+            }
+
+            || We are processing the quoted right-hand side
+            || of an element's attribute.
+         elseif state == ParseStateEnum.QUOTE then
+            {if (c == quotec) then
+                set attr-value = {sb.to-String}
+                {sb.clear}
+                {if attrs == null then
+                    set attrs = {Arguments}
+                }
+                {attrs.append attr-value, keyword= attr-name}
+                set state = ParseStateEnum.IN_TAG
+                
+             elseif (c ==' ' or c == '\r' or c=='\n' or c == '\u0009') then
+                || whitespace normalization
+                {sb.append ' '}
+             elseif (c == '&') then
+                {state-stack.push state}
+                set state = ParseStateEnum.ENTITY
+                {etag.clear}
+             else
+                {sb.append c}
+            }
+            || We are inside one of these <? ... ?>
+            || or one of these <!DOCTYPE ... >
+         elseif state == ParseStateEnum.DOCTYPE then
+            {if (c == '>') then
+                set state = {state-stack.pop}
+                {if state == ParseStateEnum.TEXT then
+                    set state = ParseStateEnum.PRE
+                }
+             elseif (c == '\[') then
+                {state-stack.push state}
+                set state = ParseStateEnum.DOCTYPE-CONTENT
+            }
+                     
+            || handle content inside a !DOCTYPE [
+         elseif state == ParseStateEnum.DOCTYPE-CONTENT then
+            {if (c == '\]') then
+                set state = {state-stack.pop}
+            }
+        }
+    } || loop
+    {if state != ParseStateEnum.DONE then
+        {gen-exception "missing end tag",line,col}
+    }
+    {return root-node}
+  } || parse
+  
+  
+  {method inline final {new-node current-node:sadXMLNode, name:String, depth:int}:sadXMLNode
+    let cnode:sadXMLNode = {sadXMLNode name, depth = depth}
+    {if depth == current-node.depth + 1 then
+        || if depth is one more than current, add as a child
+        {current-node.append cnode}
+     elseif depth == current-node.depth then
+        ||  if depth is current, then add to the parent
+        {current-node.parent.append cnode}
+     elseif depth < current-node.depth then
+        || should only be here if the depth count got confused
+        || if depth is less, then walk up the tree to find the correct parent
+        let steps:int = current-node.depth - depth + 1
+        let pnode:#sadXMLNode = current-node
+        {for i = 1 to steps do
+            set pnode = pnode.parent
+            {if-non-null pnode then
+                {if pnode.depth < depth then {break}}
+             else
+                {break}
+            }
+        }
+        {if-non-null pnode then
+            {pnode.append cnode}
+         else
+            {gen-exception "bad tree", 0, 0}
+        }
+    }
+    {return cnode}
+  }
+} || class sadXMLParser
+
+{define-proc public {gen-exception text:String, line:int, col:int}:void
+    {throw
+        {Exception
+            {message {value text} near line {value line}, column {value col}}
+        }
+    }
+}
+
