@@ -1,0 +1,702 @@
+|| SHA-1.scurl
+|| maintained by: sadman
+
+|| Implementation of a SHA-1 message digest derived from FIPS PUB 140-2
+||
+|| Classes:
+||  sadSHA-1-Digester: 
+||  sadSHA-1-Digest
+||  sadSHA-1-ByteInputStream
+||  sadSHA-1-ByteOutputStream
+|| 
+|| Distributed under the New BSD License:
+|#
+  Copyright (c) 2006, Steve Adams
+  All rights reserved.
+
+  Redistribution and use in source and binary forms, with or without modification, are permitted 
+  provided that the following conditions are met:
+
+    * Redistributions of source code must retain the above copyright notice, this list of conditions 
+      and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright notice, this list of conditions 
+      and the following disclaimer in the documentation and/or other materials provided with the distribution.
+    * Neither the name of the <ORGANIZATION> nor the names of its contributors may be used to endorse or promote products 
+      derived from this software without specific prior written permission.
+
+  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED 
+  WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A 
+  PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY 
+  DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, 
+  PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) 
+  HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT 
+  (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, 
+  EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#|
+{curl-file-attributes character-encoding = "utf8"}
+{doc-next
+    {purpose A SHA-1 message digest.}
+    {details
+        {code sadSHA-1-Digest} objects may be created using
+        a {docref sadSHA-1-Digester}.
+    }
+}
+
+{define-class public final sadSHA-1-Digest 
+  {inherits {MsgDigest-of-len 5}}
+  
+  || init
+  {doc-next
+    {purpose Initialize the digest.}
+    {parameter ...,
+        Takes the same arguments as {docref MsgDigest-of-len.default}.
+    }
+  }
+  {constructor public {default ...:any}
+    {construct-super.default ...}
+  }
+  
+  {doc-next
+    {purpose Construct from a {ctext StringInterface}.}
+  }
+  {constructor public implicit {from-string str:StringInterface}
+    {construct-super.from-string str}
+  }
+  
+  || String convenience functions 
+  {doc-next {purpose Return a lower case string representing the digest.}}
+  {method public {to-lower-String}:String
+    {return
+        {{String self}.to-lower-clone}
+    }
+  }
+  
+  {doc-next {purpose Return an upper case string representing the digest.}}
+  {method public {to-upper-String}:String
+    {return
+        {{String self}.to-upper-clone}
+    }
+  }
+  
+  || clone
+  {doc-next
+    {purpose Creates a copy of the digest.}
+    {return-vals 
+        Returns a new sadSHA-1-Digest identical to the
+        current object.
+    }
+  }
+  {method public {clone}:sadSHA-1-Digest
+    || create a new null digest (all zero bits)
+    let result:sadSHA-1-Digest = {sadSHA-1-Digest}
+    {result.xor-with self}
+    {return result}
+  }
+
+  || combined-with
+  {doc-next
+    {purpose Returns a new digest representing the union of digests.}
+    {parameter other,
+        Another sadSHA-1 digest to be combined with this one.
+    }
+    {parameter ...,
+        Additional sadSHA-1-Digests may also be specified.
+    }
+    {return-vals Returns the new digest.}
+    {details
+        Creates a new digest from the current digest and all of those
+        passed in as arguments.  The state of the current digest
+        and all of the arguments will not be changed.
+
+        The ordering of the arguments is not significant.
+    }
+  }
+  {method public {combined-with 
+                     other:sadSHA-1-Digest, 
+                     ...:sadSHA-1-Digest
+                 }:sadSHA-1-Digest
+    let result:sadSHA-1-Digest = {sadSHA-1-Digest}
+    {result.xor-with self} || cute hack -- see clone
+    {result.add-with other}
+    {for yet-another in ... do
+        {result.add-with yet-another}
+    }
+    {return result}
+  }
+
+} || sadSHA-1-Digest
+
+||----------------
+|| SHA-1-Digester
+||----------------
+
+{doc-next
+    {purpose A message digester for {docref sadSHA-1-Digest}}
+}
+{define-class public final sadSHA-1-Digester 
+  {inherits {MsgDigester-for sadSHA-1-Digest}}
+  
+  ||---------------
+  || Private state
+  ||---------------
+  
+  || Message digest currently being computed
+  field private _H0:int32
+  field private _H1:int32
+  field private _H2:int32
+  field private _H3:int32
+  field private _H4:int32
+
+  || Current 512 bit message block
+  field private constant _block:{FastArray-of byte} = 
+      {new {FastArray-of byte}, max-size = 64}
+  
+  || Count of blocks processed so far.  Needed to
+  || determine the message size (which is required
+  || by the algorithm.  Negative value indicates that
+  || digester is not started.
+  field private _blocks-processed:int = -1
+
+  || preallocated for use by process-block:
+  field private constant _W:{FastArray-of int32} =
+      {new {FastArray-of int32}.from-size, 80, 0}
+  
+  ||--------------
+  || Construction
+  ||--------------
+  
+  || init
+  {doc-next
+    {purpose Initialize the digester.}
+    {parameter char-encoding,
+        The character encoding to be used by 
+        {docref SHA-1-Digester.add-char} and 
+        related methods.  Also see {docref MsgDigester-for.default}.
+    }
+  }
+  {constructor public {default char-encoding:CharEncoding=CharEncoding.utf8}
+    {construct-super char-encoding=char-encoding}
+  }
+
+  ||--------------------
+  || Digesting methods
+  ||--------------------
+  
+  || start
+  {doc-next
+    {purpose Start the digest.}
+    {details
+        Produces an error if digester was already started.
+    }
+  }
+  {method public final {start}:void
+    {if self.started? then {error}}
+    set self._H0 = 0x67452301
+    set self._H1 = 0xEFCDAB89
+    set self._H2 = 0x98BADCFE
+    set self._H3 = 0x10325476
+    set self._H4 = 0xC3D2E1F0
+
+    set self._blocks-processed = 0
+  }
+  
+  || started?
+  {getter public inline final {started?}:bool
+    {return self._blocks-processed >= 0}
+  }
+
+  || add-byte
+  {method public inline final {add-byte c:byte}:void
+    {self._block.append c}
+    {if {self.block-full?} then
+        {self.process-block}
+    }
+  }
+
+  || finish
+  {method public final {finish}:sadSHA-1-Digest
+    {if not self.started? then {error}}
+    
+    let my-block:{FastArray-of byte} = self._block
+
+    || Compute message size in bits
+    {let bits-in-msg:int32 = 
+        (512 * self._blocks-processed) + (8 * my-block.size)}
+    
+    || append a high-order '1' to block:
+    {my-block.append 0x80}
+    
+    {if my-block.size > 56 then
+        || not enough room for message length at end of block
+        {while my-block.size < 64 do
+            {my-block.append 0}
+        }
+        {self.process-block}
+    }
+    
+    || write message length in last 64 bits of last block
+    || (We go to 59 instead of 55 because we do not yet support
+    ||  64 bit message lengths).
+    {for i:int = my-block.size to 59 do
+        {my-block.append 0}
+    }
+    {my-block.append {bit-srl bits-in-msg, 24} asa byte}
+    {my-block.append {bit-and {bit-srl bits-in-msg, 16}, 0xff} asa byte}
+    {my-block.append {bit-and {bit-srl bits-in-msg, 8}, 0xff} asa byte}
+    {my-block.append {bit-and bits-in-msg,0xff} asa byte}
+    {self.process-block}
+   
+    set self._blocks-processed = -1
+
+    {return {sadSHA-1-Digest self._H0, self._H1, self._H2, self._H3, self._H4}}
+    
+  } || finish
+
+  || block-full?
+  {method inline private {block-full?}:bool
+    {return 64 == self._block.size}
+  }
+  
+  || process-block
+  {method private {process-block}:void
+    {if not {self.block-full?} then {error}}
+    || Note: ordinarily I would not use variable names this short,
+    ||       but these are the names used in the FIPS document.
+
+    let my-block:{FastArray-of byte} = self._block
+
+    || Step a)
+    let W:{FastArray-of int32} = self._W
+    {for t = 0 to 15 do
+        let i:int = t * 4
+        || bytes go into word in order from high-order byte to 
+        || low-order.  
+        let bv:ByteVec = 
+            {ByteVec
+                my-block[i + 3],my-block[i + 2],my-block[i + 1],my-block[i + 0]
+            }
+
+        set W[t] = {ByteVec-to-int32 bv}
+    }
+    
+    || Step b)
+    {for t:int = 16 to 79 do
+        set W[t] = 
+            {bit-rol 
+                {bit-xor
+                    W[t - 3],
+                    W[t - 8],
+                    W[t - 14],
+                    W[t - 16]
+                },
+                1
+            }
+    }
+    
+    || Step c)
+    {let 
+        a:int32 = self._H0,
+        b:int32 = self._H1,
+        c:int32 = self._H2,
+        d:int32 = self._H3,
+        e:int32 = self._H4,
+        t:int32 = 0,
+        fn:int32 = 0
+    }
+
+    || Step d)
+    {for i:int = 0 to 79 do
+        {if 0 <= i and i <= 19 then
+            set fn = {self.ch b,c,d} + 0x5A827999
+         elseif 20 <= i and i <= 39 then
+            set fn = {self.parity b, c, d} + 0x6ED9EBA1
+         elseif 40 <= i and i <= 59 then
+            set fn = {self.maj b, c, d} + 0x8F1BBCDC
+         else
+            set fn = {self.parity b, c, d} + 0xCA62C1D6
+        }
+        
+        set t = fn + {bit-rol a,5} + e + W[i]
+
+        set e = d
+        set d = c
+        set c = {bit-rol b, 30}
+        set b = a
+        set a = t
+   
+    }
+    
+    || Step e)
+    set self._H0 = self._H0 + a
+    set self._H1 = self._H1 + b
+    set self._H2 = self._H2 + c
+    set self._H3 = self._H3 + d
+    set self._H4 = self._H4 + e
+           
+    {my-block.clear}
+    {set self._blocks-processed = self._blocks-processed + 1}
+    
+  } || process-block
+  
+  {method private {parity x:int32, y:int32,z:int32}:int32
+    {return
+        {bit-and 0xffffffff, 
+            {bit-xor x, y, z}
+        }
+    }
+  }
+  
+  {method private {maj x:int32, y:int32,z:int32}:int32
+    {return
+        {bit-and 0xffffffff, 
+            {bit-xor
+                {bit-and x,y},
+                {bit-and x,z},
+                {bit-and y,z}
+            }
+        }
+    }
+  }
+  
+  {method private {ch x:int32, y:int32,z:int32}:int32
+    {return
+        {bit-and 0xffffffff, 
+            {bit-xor
+                {bit-and x, y},
+                {bit-and {bit-not x}, z}
+            }
+        }
+    }
+  }
+  
+    {method public {digest-from-hex-string 
+                     hex-string:StringInterface,
+                     limit:int = max-int                     
+                 }:sadSHA-1-Digest
+    
+    let bv:ByteVec = 
+        {ByteVec-from-hex-string hex-string}
+    
+    {if limit < bv.size then
+        {bv.remove limit, length = bv.size - limit}
+    }
+    
+    let digest:sadSHA-1-Digest = 
+        {self.digest-from-byte-stream 
+            {new 
+                {InputStream-of-from byte, ByteVec}, bv
+            }
+        }
+    
+    {return digest}
+  }
+} || sadSHA-1-Digester
+
+||=======================
+|| sadSHA-1-ByteInputStream
+||=======================
+
+{doc-next
+    {purpose {docref ByteInputStream} filter that computes sadSHA-1 digest}
+    {details
+        This class is used to filter an existing {docref ByteInputStream}
+        to compute a {docref sadSHA-1-Digest} based on the bytes read from
+        the underlying stream.
+
+        This should produce the same digest as that produced by 
+        {docref sadSHA-1-ByteOutputStream} for the same sequence of bytes.
+    }
+    {for-example
+        {curl-code
+            let digesting-stream:sadSHA-1-ByteInputStream =
+                {sadSHA-1-ByteInputStream existing-stream}
+            {do-something-with-stream digesting-stream}
+            {digesting-stream.close}
+            let digest:sadSHA-1-Digest = digesting-stream.digest
+        }
+    }
+}
+{define-class public final sadSHA-1-ByteInputStream
+  {inherits {InputStream-of byte}}
+
+  field private _digester:sadSHA-1-Digester
+
+  field private _stream:#ByteInputStream
+
+  field private constant close-stream-on-close?:bool
+
+  {doc-next
+    {purpose The computed sadSHA-1 message digest.}
+    {details
+        Will be null until {ctext self.finish-digest} is called, which
+        happens automatically when the stream is closed.
+    }
+  }
+  field public-get private-set digest:#sadSHA-1-Digest
+
+  ||--------------
+  || Construction
+  ||--------------
+
+  {doc-next
+    {purpose Initialize stream.}
+    {parameter stream, the underlying output stream.  All operations
+        will be dispatched to this object.
+    }
+    {parameter close-stream-on-close?, 
+        specifies whether this class's {ctext close} method should invoke 
+        {ctext close} on the underlying stream.
+    }
+  }
+  {constructor public {default
+                          stream:ByteInputStream,
+                          close-stream-on-close?:bool = true
+                      }
+    set self._stream = stream
+    set self.close-stream-on-close? = close-stream-on-close?
+    set self._digester = {sadSHA-1-Digester}
+    {self._digester.start}
+    {construct-super}
+  }
+
+  ||------------------
+  || Field access
+  ||------------------
+
+  {doc-next
+    {purpose The underlying stream object.}
+  }
+  {getter public {stream}:ByteInputStream
+    ||{self.verify-open}
+    {return {non-null self._stream}}
+  }
+
+  ||------------------
+  || Stream interface
+  ||------------------
+
+  {doc-next
+    {purpose Implement read operations}
+    {details
+        Reads from underlying stream, and if successful adds
+        byte to message digester.
+    }
+  }
+  {method public final {read-one}:(b:byte, eof?:bool)
+    let (b:byte, eof?:bool) = {self.stream.read-one}
+    {if not eof? and self._digester.started? then
+        {self._digester.add-byte b}
+    }
+    {return b, eof?}
+  }
+
+  {getter public final {open?}:bool
+    {return self._stream != null}
+  }
+
+  {doc-next
+    {purpose Closes stream and finishes message digest.}
+  }
+  {method public final {close}:void
+    {if-non-null stream = self._stream then
+        set self._stream = null
+        {try
+            {self.finish-digest}
+         finally
+            {if self.close-stream-on-close? then
+                {stream.close}
+            }
+        }
+    }
+  }
+
+  || doc inherited
+  {getter public final {origin-url}:#Url
+    {return self.stream.origin-url}
+  }
+
+  || Doc-string inherited
+  {getter public {when-last-modified}:#DateTime
+    {return self.stream.when-last-modified}
+  }
+
+  
+  ||-------------
+  || MsgDigester
+  ||-------------
+
+  {doc-next
+    {purpose Finishes computation of message digest}
+    {details
+        All bytes read after invoking this will not be
+        reflected in the digest.
+    }
+  }
+  {method public final {finish-digest}:sadSHA-1-Digest
+    || This method can be called after the stream has been closed.  Of
+    || course, closing the stream will already have set self.digest,
+    || so such a call will just return the already-computed digest.
+    {if-non-null digest = self.digest then
+        {return digest}
+     else
+        let digest:sadSHA-1-Digest = {self._digester.finish}
+        set self.digest = digest
+        {return digest}
+    }
+  }
+
+} || sadSHA-1-ByteInputStream
+
+
+||========================
+|| sadSHA-1-ByteOutputStream
+||========================
+
+{doc-next
+    {purpose {docref ByteOutputStream} filter that computes sadSHA-1 digest}
+    {details
+        This class is used to filter an existing {docref ByteOutputStream}
+        to compute a {docref sadSHA-1-Digest} based on the bytes written to
+        the underlying stream.
+    }
+    {for-example
+        {curl-code
+            let digesting-stream:sadSHA-1-ByteOutputStream =
+                {sadSHA-1-ByteOutputStream existing-stream}
+            {do-something-with-stream digesting-stream}
+            {digesting-stream.close}
+            let digest:sadSHA-1-Digest = digesting-stream.digest
+        }
+    }
+}
+{define-class public final sadSHA-1-ByteOutputStream {inherits ByteOutputStream}
+
+  ||-------
+  || State
+  ||-------
+
+  field private constant _digester:sadSHA-1-Digester
+
+  field private _stream:#ByteOutputStream
+  
+  field private constant close-stream-on-close?:bool
+
+  {doc-next
+    {purpose The computed sadSHA-1 message digest.}
+    {details
+        Will be null until the stream is closed.
+    }
+  }
+  field public-get private-set digest:#sadSHA-1-Digest
+
+  ||--------------
+  || Construction
+  ||--------------
+
+  {doc-next
+    {purpose Initialize stream.}
+    {parameter stream, the underlying output stream.  All operations
+        will be dispatched to this object.
+    }
+    {parameter close-stream-on-close?, 
+        specifies whether this class's {ctext close} method should invoke 
+        {ctext close} on the underlying stream.
+    }
+  }
+  {constructor public {default 
+                          stream:ByteOutputStream,
+                          close-stream-on-close?:bool = true
+                      }
+    set self._stream = stream
+    set self.close-stream-on-close? = close-stream-on-close?
+    set self._digester = {sadSHA-1-Digester}
+    {self._digester.start}
+    {construct-super}
+  }
+
+  ||------------------
+  || Field access
+  ||------------------
+
+  {doc-next
+    {purpose The underlying stream object.}
+  }
+  {getter public {stream}:ByteOutputStream
+    ||{self.verify-open}
+    {return {non-null self._stream}}
+  }
+
+  ||------------------
+  || Stream interface
+  ||------------------
+
+  {doc-next
+    {purpose Implement write operations}
+    {details
+        Adds byte to message digester and writes to underlying stream.
+    }
+  }
+  {method public final {write-one b:byte}:void
+    {self.stream.write-one b}
+    {self._digester.add-byte b}
+  }
+
+  {getter public final {open?}:bool
+    {return self._stream != null}
+  }
+
+  {doc-next
+    {purpose Closes stream and finishes message digest.}
+  }
+  {method public final {close}:void
+    {if-non-null stream = self._stream then
+        set self._stream = null
+        {try
+            {self.finish-digest}
+         finally
+            {if self.close-stream-on-close? then
+                {stream.close}
+            }
+        }
+    }
+  }
+
+  {method public final {flush
+                           non-blocking?:bool = false,
+                           allow-short-write?:bool = false
+                       }:void
+    {self.stream.flush
+        non-blocking? = non-blocking?, allow-short-write? = allow-short-write?
+    }
+  }
+
+  || doc inherited
+  {getter public final {origin-url}:#Url
+    {return self.stream.origin-url}
+  }
+
+  ||-------------
+  || MsgDigester
+  ||-------------
+
+  {doc-next
+    {purpose Finishes computation of message digest}
+    {details
+        All bytes added after invoking this will not be
+        reflected in the digest.
+    }
+  }
+  {method public final {finish-digest}:sadSHA-1-Digest
+    || This method can be called after the stream has been closed.  Of
+    || course, closing the stream will already have set self.digest,
+    || so such a call will just return the already-computed digest.
+    {if-non-null digest = self.digest then
+        {return digest}
+     else
+        let digest:sadSHA-1-Digest = {self._digester.finish}
+        set self.digest = digest
+        {return digest}
+    }
+  }
+
+} || sadSHA-1-ByteOutputStream
