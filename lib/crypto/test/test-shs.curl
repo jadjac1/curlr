@@ -28,7 +28,7 @@
   (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, 
   EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #|
-{curl 4.0 applet}
+{curl 5.0 applet}
 {curl-file-attributes character-encoding = "utf8"}
 {applet
     {compiler-directives careful? = true}
